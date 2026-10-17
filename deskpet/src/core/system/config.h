@@ -1,7 +1,7 @@
 #pragma once
 #include <stdint.h>
 
-inline constexpr char VERSION[] = "DeskPet 1.7.0";
+inline constexpr char VERSION[] = "DeskPet 1.8.0";
 inline constexpr char TIMEZONE[] = "ICT-7";
 
 constexpr int SCREEN_WIDTH = 320, SCREEN_HEIGHT = 240;
