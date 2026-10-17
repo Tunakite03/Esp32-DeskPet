@@ -1,0 +1,86 @@
+# ==========================================
+# ESP32 & Arduino CLI Build Artifacts
+# ==========================================
+build/
+**/build/
+sketch/
+**/sketch/
+
+# Binary & compiled object files
+*.o
+*.d
+*.a
+*.elf
+*.hex
+*.map
+*.merged
+*.ino.cpp
+*.ino.cpp.merged
+*.bootloader.bin
+*.partitions.bin
+
+# Ignore all firmware .bin files except generated pet assets
+*.bin
+!deskpet/assets/pets.bin
+
+# Arduino CLI local libraries and packages
+.arduino/
+**/.arduino/
+
+# ==========================================
+# Backup & Dump Files
+# ==========================================
+backups/
+**/backups/
+*.bak
+*.backup
+
+
+# ==========================================
+# Logs & Test outputs
+# ==========================================
+*.log
+**/logs/
+
+# ==========================================
+# Python (Tools & Asset generation)
+# ==========================================
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+
+# ==========================================
+# Secrets & Local Configurations
+# ==========================================
+secrets.h
+credentials.h
+wifi_credentials.h
+*.local.*
+.env
+.env.*
+
+# ==========================================
+# Operating System & IDE Files
+# ==========================================
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# VS Code (preserve shared configuration if any)
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+
+# JetBrains / CLion
+.idea/
+*.iml
+
+# Scratch files
+*.tmp
+*~
+page-mascot-tree.json

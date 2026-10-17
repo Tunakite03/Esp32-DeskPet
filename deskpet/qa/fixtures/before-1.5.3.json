@@ -1,0 +1,36 @@
+[
+  {
+    "firmware": "DeskPet 1.5.2",
+    "board": "ES3C28P",
+    "uptime_ms": 1137725,
+    "heap": 221424,
+    "psram": 8388608,
+    "page": 0,
+    "wifi": true,
+    "clock_synced": true,
+    "weather_valid": true,
+    "weather_error": 0,
+    "alarm_ringing": false,
+    "touch_errors": 0
+  },
+  {
+    "brightness": 3,
+    "brightness_percent": 1,
+    "backlight_pwm": 3,
+    "volume": 58,
+    "muted": false,
+    "audio_ready": true,
+    "audio_completed": 47,
+    "audio_peak": 2859,
+    "settings_pending": false
+  },
+  {
+    "alarm_hour": 8,
+    "alarm_minute": 30,
+    "enabled": true,
+    "ringing": false,
+    "last_fired_day": 0,
+    "clock_synced": true,
+    "local_time": "2026-10-16 22:57:38"
+  }
+]

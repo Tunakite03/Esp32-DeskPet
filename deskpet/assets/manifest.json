@@ -1,0 +1,28 @@
+{
+  "bytes": 804783,
+  "crc32": 3678217340,
+  "decoded_crc32": 756187992,
+  "assets": [
+    {
+      "name": "Cat",
+      "side": 144,
+      "frames": 18,
+      "duration_ms": 0,
+      "bytes": 252162
+    },
+    {
+      "name": "Bunny",
+      "side": 144,
+      "frames": 18,
+      "duration_ms": 0,
+      "bytes": 245170
+    },
+    {
+      "name": "Fox",
+      "side": 144,
+      "frames": 18,
+      "duration_ms": 0,
+      "bytes": 305544
+    }
+  ]
+}

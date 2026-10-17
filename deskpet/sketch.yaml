@@ -1,0 +1,8 @@
+profiles:
+  es3c28p:
+    fqbn: esp32:esp32:esp32s3:USBMode=hwcdc,CDCOnBoot=cdc,FlashSize=16M,PSRAM=opi,PartitionScheme=custom
+    platforms:
+      - platform: esp32:esp32 (3.3.12)
+    libraries:
+      - GFX Library for Arduino (1.6.9)
+      - ArduinoJson (7.4.3)
