@@ -19,8 +19,28 @@ QueueHandle_t weatherResults = nullptr;
 
 bool plausible(const WeatherResult &result) {
   return isfinite(result.temperature) && result.temperature >= -90 && result.temperature <= 65 &&
-         result.humidity >= 0 && result.humidity <= 100 && result.rainChance >= 0 && result.rainChance <= 100 &&
-         result.code >= 0 && result.code <= 99;
+         result.humidity >= 0 && result.humidity <= 100 && result.code >= 0 && result.code <= 99;
+}
+
+// Reads the hourly times ("2026-10-17T16:00") and chances of rain; false unless
+// there are exactly RAIN_HOURS well-formed entries.
+bool readHourlyRain(JsonVariantConst hourly, HourlyRain (&rain)[RAIN_HOURS]) {
+  const JsonArrayConst times = hourly["time"];
+  const JsonArrayConst chances = hourly["precipitation_probability"];
+  if (times.size() != RAIN_HOURS || chances.size() != RAIN_HOURS) return false;
+  for (uint8_t slot = 0; slot < RAIN_HOURS; ++slot) {
+    const char *time = times[slot].as<const char *>();
+    if (!time || strlen(time) != 16 || time[10] != 'T' || !isdigit(static_cast<unsigned char>(time[11])) ||
+        !isdigit(static_cast<unsigned char>(time[12])) || !chances[slot].is<int>()) {
+      return false;
+    }
+    const int hour = (time[11] - '0') * 10 + (time[12] - '0');
+    const int chance = chances[slot].as<int>();
+    if (hour > 23 || chance < 0 || chance > 100) return false;
+    rain[slot].hour = hour;
+    rain[slot].chance = chance;
+  }
+  return true;
 }
 
 // Network.hostByName() (used by HTTPClient) clears the lwIP DNS cache without
@@ -65,7 +85,8 @@ WeatherResult fetchWeather(uint8_t requestedPlace) {
   const String path = "/v1/forecast?latitude=" + String(location.latitude, 4) +
                       "&longitude=" + String(location.longitude, 4) +
                       "&current=temperature_2m,relative_humidity_2m,weather_code"
-                      "&daily=precipitation_probability_max&timezone=auto&forecast_days=1";
+                      "&hourly=precipitation_probability"
+                      "&forecast_hours=" + String(RAIN_HOURS) + "&timezone=auto&forecast_days=1";
   for (uint8_t attempt = 1; attempt <= 3; ++attempt) {
     if (WiFi.status() != WL_CONNECTED) { result.error = WeatherError::Network; return result; }
     int status = 0;
@@ -84,7 +105,8 @@ WeatherResult fetchWeather(uint8_t requestedPlace) {
       filter["current"]["temperature_2m"] = true;
       filter["current"]["relative_humidity_2m"] = true;
       filter["current"]["weather_code"] = true;
-      filter["daily"]["precipitation_probability_max"] = true;
+      filter["hourly"]["time"] = true;
+      filter["hourly"]["precipitation_probability"] = true;
       JsonDocument json;
       const DeserializationError parseError =
           deserializeJson(json, client, DeserializationOption::Filter(filter));
@@ -92,15 +114,14 @@ WeatherResult fetchWeather(uint8_t requestedPlace) {
         result.error = WeatherError::Json;
       } else {
         const JsonObjectConst current = json["current"].as<JsonObjectConst>();
-        const JsonVariantConst rainChance = json["daily"]["precipitation_probability_max"][0];
         if (!current["temperature_2m"].is<float>() || !current["relative_humidity_2m"].is<int>() ||
-            !current["weather_code"].is<int>() || !rainChance.is<int>()) {
+            !current["weather_code"].is<int>() ||
+            !readHourlyRain(json["hourly"], result.rainByHour)) {
           result.error = WeatherError::Schema;
         } else {
           result.temperature = current["temperature_2m"].as<float>();
           result.humidity = current["relative_humidity_2m"].as<int>();
           result.code = current["weather_code"].as<int>();
-          result.rainChance = rainChance.as<int>();
           result.error = plausible(result) ? WeatherError::None : WeatherError::Schema;
           result.fetchedAt = millis();
         }

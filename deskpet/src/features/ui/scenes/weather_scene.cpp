@@ -62,13 +62,19 @@ void drawWeather(const AppState &state, uint32_t now) {
     canvas.drawFastHLine(18, 155, 284, COLOR_SURFACE);
     uiText(18, 168, "HUMIDITY", FONT_SMALL, COLOR_TEXT);
     uiText(85, 166, String(current.humidity) + "%", FONT_BODY, COLOR_TEXT);
-    uiText(138, 168, "RAIN", FONT_SMALL, COLOR_TEXT);
-    uiText(178, 166, String(current.rainChance) + "%", FONT_BODY, COLOR_TEXT);
     const String age = weather.busy ? "Updating..."
                      : current.error != WeatherError::None ? "Retry pending"
                      : String((now - current.fetchedAt) / 60000) + " min ago";
     uiRightAligned(168, age, FONT_SMALL);
     if (weather.busy) spinner(302 - textWidth(age, FONT_SMALL) - 13, 174, now);
+    // Chance of rain this hour and the next five: the hour in white, the chance in the rain colour.
+    for (uint8_t slot = 0; slot < RAIN_HOURS; ++slot) {
+      const HourlyRain &rain = current.rainByHour[slot];
+      const int x = 18 + slot * 48;
+      const String hour = String(rain.hour) + "h";
+      uiText(x, 189, hour, FONT_SMALL, COLOR_TEXT);
+      uiText(x + textWidth(hour, FONT_SMALL) + 2, 189, String(rain.chance) + "%", FONT_SMALL, COLOR_SKY);
+    }
   } else {
     weatherIcon(270, 100, 3);
     const char *message = weather.busy ? "Checking the sky" : online ? "Weather pending" : "Waiting for Wi-Fi";
@@ -76,7 +82,7 @@ void drawWeather(const AppState &state, uint32_t now) {
     if (weather.busy) spinner(18 + textWidth(message, FONT_TITLE) + 14, 99, now);
     uiText(18, 116, online ? "Tap to try again" : "Hold BOOT to connect", FONT_BODY, COLOR_TEXT);
     if (current.error == WeatherError::Clock) uiText(18, 145, "Waiting for clock sync", FONT_SMALL, COLOR_TEXT);
+    uiText(18, 189, "Tap to refresh", FONT_SMALL, COLOR_TEXT);
   }
-  uiText(18, 189, "Tap to refresh", FONT_SMALL, COLOR_TEXT);
 }
 }  // namespace ui

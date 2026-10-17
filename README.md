@@ -11,7 +11,7 @@ it hears in a higher voice.
 |---|---|
 | Pet | Animated companion (bunny, cat, dino, frog). Tap to make it react, long-press it to pick another one. |
 | Clock | Local time (Vietnam, UTC+7, synced over NTP) and an alarm that plays a ringtone through the speaker. |
-| Weather | Temperature, humidity, today's chance of rain and the sky condition from [Open-Meteo](https://open-meteo.com). It refreshes every 15 minutes, or when you tap the page. |
+| Weather | Temperature, humidity, the sky condition and the chance of rain for this hour and the next five, from [Open-Meteo](https://open-meteo.com). It refreshes every 15 minutes, or when you tap the page. |
 | Settings | Brightness, volume, mute, a sound test and the talk mode switch. Settings are saved to flash and kept across reboots. |
 
 - **Wi-Fi setup portal**: the device starts its own access point. Join it from a
