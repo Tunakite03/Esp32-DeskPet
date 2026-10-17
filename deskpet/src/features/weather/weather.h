@@ -8,6 +8,7 @@ struct WeatherResult {
   WeatherError error = WeatherError::Network;
   float temperature = 0;
   int humidity = 0;
+  int rainChance = 0;  // today's highest hourly chance of precipitation, percent
   int code = 0;
   uint32_t fetchedAt = 0;
 };
