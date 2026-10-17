@@ -39,6 +39,36 @@ uint64_t uiTotalMicros = 0, uiPixelsSent = 0;
 RenderTiming lastTiming;
 int transferRow = TILE_ROWS;  // tile rows of the last drawn frame that are still to be sent
 
+// The tab highlight slides to a newly chosen tab, easing out over NAV_SLIDE_MS.
+constexpr uint32_t NAV_SLIDE_MS = 180;
+uint8_t navPage = PAGE_PET;
+Rect navFrom{};  // set when a slide starts
+uint32_t navChangedAt = 0;
+
+Rect navPillAt(uint32_t now) {
+  const Rect to = navPill(navPage);
+  const uint32_t elapsed = now - navChangedAt;
+  if (elapsed >= NAV_SLIDE_MS) return to;
+  const float t = static_cast<float>(elapsed) / NAV_SLIDE_MS;
+  const float eased = 1 - (1 - t) * (1 - t) * (1 - t);
+  const auto mix = [eased](int from, int target) { return from + static_cast<int>(lroundf((target - from) * eased)); };
+  return {mix(navFrom.x, to.x), to.y, mix(navFrom.w, to.w), to.h};
+}
+
+// Starts a slide when the page changed; a slide already under way continues from where it is.
+void trackNavPage(uint8_t page, uint32_t now) {
+  if (page == navPage) return;
+  navFrom = navPillAt(now);
+  navPage = page;
+  navChangedAt = now;
+}
+
+// Changes every 10 ms while the highlight slides, so those frames are not skipped.
+uint32_t navSlideStep(uint32_t now) {
+  const uint32_t elapsed = now - navChangedAt;
+  return elapsed < NAV_SLIDE_MS ? 1 + elapsed / 10 : 0;
+}
+
 void flushAll() {
   canvas.flush();
   memcpy(previousFrame, canvas.getFramebuffer(), SCREEN_WIDTH * SCREEN_HEIGHT * sizeof(uint16_t));
@@ -136,6 +166,7 @@ void renderFrame(const AppState &state, uint32_t now) {
   const bool sleeping = now - state.lastInteraction > PET_SLEEP_AFTER && !pet.reacting;
   const bool petVisible = !state.alarmRinging && !state.setup.open && state.page == PAGE_PET && !pet.pickerOpen;
   const uint32_t animation = petVisible ? petVisualFrame(state, now) * 5 + petBounceStep(state, now) : 0;
+  trackNavPage(state.page, now);
   // Everything that can change what is on screen. Identical stamps skip the frame.
   const uint32_t stamp[] = {
     state.page, state.setup.open, static_cast<uint32_t>(time(nullptr) / 60), static_cast<uint32_t>(WiFi.status()),
@@ -146,7 +177,7 @@ void renderFrame(const AppState &state, uint32_t now) {
     device.brightness, device.volume, device.muted, audioIsReady(),
     pet.mascot, pet.pickerOpen, pet.pickerPage, petAssetsReady(), static_cast<uint8_t>(pet.expression),
     device.talk, micReady(), static_cast<uint8_t>(talkPhase()), talkLevel(), petVisible ? listenWaves(now) : 0u,
-    weatherSpinnerStep(state, now)
+    weatherSpinnerStep(state, now), navSlideStep(now)
   };
   static uint32_t previousStamp[sizeof(stamp) / sizeof(stamp[0])]{};
   lastTiming = RenderTiming{};
@@ -166,7 +197,7 @@ void renderFrame(const AppState &state, uint32_t now) {
       case PAGE_WEATHER: drawWeather(state, now); break;
       default: drawSettings(state); break;
     }
-    footer(state.page);
+    footer(navPillAt(now));
   }
   // The changed tiles are sent by pumpDisplay() over the next loops, not in this call.
   transferRow = 0;

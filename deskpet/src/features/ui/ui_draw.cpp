@@ -20,7 +20,72 @@ const UiGlyph *findGlyph(const UiFont &font, char character) {
   return nullptr;
 }
 
-void navIcon(int x, int y, uint8_t page, uint16_t color) {
+constexpr const char *NAV_LABELS[PAGE_COUNT] = {"Pet", "Clock", "Weather", "Settings"};
+constexpr int NAV_PILL_PADDING = 8, NAV_PILL_Y = 211, NAV_PILL_HEIGHT = 26;
+
+// Icon, 6 px gap and label of one tab.
+int navContentWidth(uint8_t page) { return textWidth(NAV_LABELS[page], FONT_SMALL) + 20; }
+
+// Mixes fg over bg; alpha runs from 0 (bg) to 15 (fg).
+uint16_t blend565(uint16_t fg, uint16_t bg, uint8_t alpha) {
+  const int red = (((fg >> 11) & 31) * alpha + ((bg >> 11) & 31) * (15 - alpha)) / 15;
+  const int green = (((fg >> 5) & 63) * alpha + ((bg >> 5) & 63) * (15 - alpha)) / 15;
+  const int blue = ((fg & 31) * alpha + (bg & 31) * (15 - alpha)) / 15;
+  return (red << 11) | (green << 5) | blue;
+}
+
+// How much of the pixel at (px, py) the pill covers, 0-15, so its rounded ends are anti-aliased.
+uint8_t pillCoverage(const Rect &pill, int px, int py) {
+  const float radius = pill.h / 2.0f;
+  const float left = pill.x + radius, right = pill.right() - radius;
+  const float x = px + 0.5f, y = py + 0.5f;
+  const float dx = x < left ? left - x : x > right ? x - right : 0;
+  const float dy = y - (pill.y + radius);
+  const float edge = radius + 0.5f - sqrtf(dx * dx + dy * dy);
+  return edge <= 0 ? 0 : edge >= 1 ? 15 : static_cast<uint8_t>(edge * 15 + 0.5f);
+}
+
+// Tab icons and labels are white where the pill lies behind them and muted elsewhere,
+// so a label the sliding pill only partly covers splits cleanly at its edge.
+uint16_t navInk(const Rect &pill, int px, int py) { return pillCoverage(pill, px, py) >= 8 ? COLOR_TEXT : COLOR_MUTED; }
+
+void fillPill(const Rect &pill, uint16_t color) {
+  uint16_t *pixels = canvas.getFramebuffer();
+  for (int py = max(pill.y, 0); py < min(pill.bottom(), SCREEN_HEIGHT); ++py) {
+    for (int px = max(pill.x, 0); px < min(pill.right(), SCREEN_WIDTH); ++px) {
+      const uint8_t coverage = pillCoverage(pill, px, py);
+      if (coverage) pixels[py * SCREEN_WIDTH + px] = blend565(color, pixels[py * SCREEN_WIDTH + px], coverage);
+    }
+  }
+}
+
+// Like uiText(), but each glyph pixel takes its colour from navInk() and blends with
+// whatever is already on the canvas (the pill or the background).
+void navLabel(int x, int y, const char *label, const Rect &pill) {
+  uint16_t *pixels = canvas.getFramebuffer();
+  for (const char *character = label; *character; ++character) {
+    const UiGlyph *glyph = findGlyph(FONT_SMALL, *character);
+    if (!glyph) continue;
+    for (int row = 0; row < glyph->height; ++row) {
+      const int py = y + row;
+      if (py < 0 || py >= SCREEN_HEIGHT) continue;
+      for (int column = 0; column < glyph->width; ++column) {
+        const int px = x + column;
+        if (px < 0 || px >= SCREEN_WIDTH) continue;
+        const int index = row * glyph->width + column;
+        const uint8_t packed = FONT_SMALL.pixels[glyph->offset + index / 2];
+        const uint8_t alpha = index % 2 ? packed & 15 : packed >> 4;
+        if (alpha) {
+          uint16_t &pixel = pixels[py * SCREEN_WIDTH + px];
+          pixel = blend565(navInk(pill, px, py), pixel, alpha);
+        }
+      }
+    }
+    x += glyph->advance;
+  }
+}
+
+void navIcon(int x, int y, uint8_t page, const Rect &pill) {
   if (page >= PAGE_COUNT) return;
   static constexpr uint16_t NAV_ICONS[PAGE_COUNT][14] = {
       // PAGE_PET: Companion cat face with ears, eyes, and smile
@@ -42,7 +107,7 @@ void navIcon(int x, int y, uint8_t page, uint16_t color) {
       if (bits & (1 << (13 - col))) {
         const int px = x + col;
         if (px >= 0 && px < SCREEN_WIDTH) {
-          pixels[py * SCREEN_WIDTH + px] = color;
+          pixels[py * SCREEN_WIDTH + px] = navInk(pill, px, py);
         }
       }
     }
@@ -101,18 +166,18 @@ void header(const char *title) {
   uiText(302 - width, 11, label, FONT_SMALL, COLOR_TEXT);
 }
 
-void navIndicator(int x) { canvas.fillRoundRect(x, NAV_INDICATOR_Y, 24, 2, 1, COLOR_TEXT); }
+Rect navPill(uint8_t page) {
+  const int width = navContentWidth(page) + 2 * NAV_PILL_PADDING;
+  return {page * NAV_TAB_WIDTH + (NAV_TAB_WIDTH - width) / 2, NAV_PILL_Y, width, NAV_PILL_HEIGHT};
+}
 
-void footer(uint8_t activePage) {
-  constexpr const char *labels[] = {"Pet", "Clock", "Weather", "Settings"};
+void footer(const Rect &pill) {
   canvas.drawFastHLine(16, NAV_DIVIDER_Y, 288, COLOR_SURFACE);
+  fillPill(pill, COLOR_ACCENT);
   for (uint8_t page = 0; page < PAGE_COUNT; ++page) {
-    const int tab = page * NAV_TAB_WIDTH;
-    const int width = textWidth(labels[page], FONT_SMALL) + 20;
-    const int x = tab + (NAV_TAB_WIDTH - width) / 2;
-    navIcon(x, NAV_LABEL_Y, page, COLOR_TEXT);
-    uiText(x + 20, NAV_LABEL_Y, labels[page], FONT_SMALL, COLOR_TEXT);
-    if (page == activePage) navIndicator(tab + NAV_INDICATOR_INSET);
+    const int x = page * NAV_TAB_WIDTH + (NAV_TAB_WIDTH - navContentWidth(page)) / 2;
+    navIcon(x, NAV_LABEL_Y, page, pill);
+    navLabel(x + 20, NAV_LABEL_Y, NAV_LABELS[page], pill);
   }
 }
 

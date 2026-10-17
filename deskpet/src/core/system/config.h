@@ -19,10 +19,11 @@ constexpr uint8_t PIN_TOUCH_RESET = 18;
 constexpr uint8_t PIN_STATUS_LED = 42;
 constexpr uint8_t PIN_BACKLIGHT = 45;
 
-// RGB565 palette. All text and icons are white for contrast on the small
-// panel; colour is reserved for accents.
+// RGB565 palette. Text and icons are white for contrast on the small panel
+// (only inactive tabs are muted); colour is reserved for accents.
 constexpr uint16_t COLOR_BACKGROUND = 0x0000;
 constexpr uint16_t COLOR_TEXT = 0xFFFF;
+constexpr uint16_t COLOR_MUTED = 0x9CF3;     // labels of the tabs that are not shown
 constexpr uint16_t COLOR_SURFACE = 0x18C3;   // dividers and neutral buttons
 constexpr uint16_t COLOR_OUTLINE = 0x4208;   // control outlines and slider tracks
 constexpr uint16_t COLOR_ACCENT = 0x228B;    // primary buttons and enabled alarm

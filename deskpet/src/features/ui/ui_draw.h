@@ -11,7 +11,6 @@ namespace ui {
 extern Arduino_Canvas canvas;
 
 constexpr uint32_t SPINNER_STEP = 80;  // one 30 degree turn of the loading spinner
-constexpr int NAV_INDICATOR_Y = 237, NAV_INDICATOR_INSET = 28;  // underline of the active tab
 
 int textWidth(const String &value, const UiFont &font);
 // Draws 4-bit anti-aliased text, blending each glyph against a solid background.
@@ -22,9 +21,11 @@ void uiRightAligned(int y, const String &value, const UiFont &font);
 
 // Page title on the left, Wi-Fi status on the right.
 void header(const char *title);
-// Tab bar along the bottom with the underline under `activePage`.
-void footer(uint8_t activePage);
-void navIndicator(int x);
+// Highlight behind the active tab's icon and label, at rest on `page`.
+Rect navPill(uint8_t page);
+// Tab bar along the bottom. `pill` is where the highlight is now: navPill(page)
+// at rest, or between two tabs while it slides. Whatever lies on the pill is drawn white.
+void footer(const Rect &pill);
 void pill(const Rect &rect, const String &label, uint16_t color);
 // Rotating arc shown while something slow (an HTTPS request) is in progress.
 void spinner(int x, int y, uint32_t now);
