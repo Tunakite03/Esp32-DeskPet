@@ -71,13 +71,13 @@ Linux, or `COMx` on Windows (Device Manager → Ports).
 First install:
 
 ```bash
-.venv/bin/esptool --chip esp32s3 --port /dev/cu.usbmodem2101 write-flash 0x0 deskpet-v1.8.1-full.bin
+.venv/bin/esptool --chip esp32s3 --port /dev/cu.usbmodem2101 write-flash 0x0 deskpet-v1.8.2-full.bin
 ```
 
 Update:
 
 ```bash
-.venv/bin/esptool --chip esp32s3 --port /dev/cu.usbmodem2101 write-flash 0x10000 deskpet-v1.8.1-app.bin
+.venv/bin/esptool --chip esp32s3 --port /dev/cu.usbmodem2101 write-flash 0x10000 deskpet-v1.8.2-app.bin
 ```
 
 The board restarts by itself when flashing is done. If esptool cannot connect,
