@@ -50,6 +50,50 @@ No toolchain needed. Download the files from the
 | `deskpet-vX.Y.Z-full.bin` | `0x0` | First install or a clean reset. It contains the bootloader, firmware and pets, and **resets saved settings** (Wi-Fi, pet name, alarm, brightness). |
 | `deskpet-vX.Y.Z-app.bin` | `0x10000` | Updating a board that already runs DeskPet. Settings and pets are kept. |
 
+There are two ways to flash them: in the browser (nothing to install) or with
+esptool on the command line. After a first install, set up Wi-Fi as described in
+[Connect to Wi-Fi](#5-connect-to-wi-fi). The installed version is shown on the
+Settings page, next to the title.
+
+### Option A: in the browser (ESP Tool web flasher)
+
+[ESP Tool](https://espressif.github.io/esptool-js/) is Espressif's flasher
+that runs in the browser. It needs **Chrome or Edge on a desktop**, because it
+talks to the board over Web Serial (Firefox and Safari do not support it).
+
+1. Plug the board in over USB and open
+   [espressif.github.io/esptool-js](https://espressif.github.io/esptool-js/).
+   Leave **WebUSB (CH340)** unticked: this board uses the ESP32-S3's built-in
+   USB, not a CH340 chip.
+2. Under **Program**, keep **Baudrate** at `921600` and click **Connect**. In
+   the browser's port list, pick the board (usually named
+   *USB JTAG/serial debug unit*), then **Connect**. The page then shows
+   *Connected to device: ESP32-S3*.
+3. In the **Flash Address** column, replace the default `0x1000` with the
+   address for your file, then choose the file in the **File** column:
+
+   | File | Flash Address |
+   |---|---|
+   | `deskpet-vX.Y.Z-full.bin` (first install) | `0x0` |
+   | `deskpet-vX.Y.Z-app.bin` (update) | `0x10000` |
+
+   **Do not keep `0x1000`.** That address is for the original ESP32; on the
+   ESP32-S3 it leaves the board unable to boot.
+4. Leave **Flash Mode** at `keep` and **Flash Size** at `detect`, then click
+   **Program** and wait for the progress bar and the log to finish.
+5. Click **Disconnect**, then unplug the board and plug it back in to start the
+   new firmware.
+
+Do not click **Erase Flash** unless you want a clean board: it also deletes the
+pets and settings, so you must then flash the **full** image at `0x0`.
+
+If **Connect** fails or the port is missing, unplug the board, hold **BOOT**
+while plugging it back in, release BOOT and click **Connect** again. If
+**Program** stops partway, lower the baudrate to `460800` or `115200` and
+program again.
+
+### Option B: esptool on the command line
+
 **1. Install esptool** in a virtual environment (Python 3 required):
 
 ```bash
@@ -80,12 +124,10 @@ Update:
 .venv/bin/esptool --chip esp32s3 --port /dev/cu.usbmodem2101 write-flash 0x10000 deskpet-v1.8.2-app.bin
 ```
 
-The board restarts by itself when flashing is done. If esptool cannot connect,
-unplug the board, hold BOOT while plugging the USB cable back in, release BOOT
-and run the command again.
-After a first install, set up Wi-Fi as described in
-[Connect to Wi-Fi](#5-connect-to-wi-fi). The installed version is shown on the
-Settings page, next to the title.
+If esptool cannot connect, unplug the board, hold BOOT while plugging the USB
+cable back in, release BOOT and run the command again. If flashing stops with
+*No more data to read from the serial port*, the USB link dropped: run the same
+command again, ideally with a short cable plugged straight into the computer.
 
 ## Build and flash
 
