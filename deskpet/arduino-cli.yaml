@@ -1,2 +1,3 @@
 directories:
-  user: E:/Esp32/deskpet/.arduino
+  # Relative to the folder arduino-cli runs from (this one, see README).
+  user: .arduino

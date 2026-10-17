@@ -62,6 +62,8 @@ void drawWeather(const AppState &state, uint32_t now) {
     canvas.drawFastHLine(18, 155, 284, COLOR_SURFACE);
     uiText(18, 168, "HUMIDITY", FONT_SMALL, COLOR_TEXT);
     uiText(85, 166, String(current.humidity) + "%", FONT_BODY, COLOR_TEXT);
+    uiText(138, 168, "RAIN", FONT_SMALL, COLOR_TEXT);
+    uiText(178, 166, String(current.rainChance) + "%", FONT_BODY, COLOR_TEXT);
     const String age = weather.busy ? "Updating..."
                      : current.error != WeatherError::None ? "Retry pending"
                      : String((now - current.fetchedAt) / 60000) + " min ago";

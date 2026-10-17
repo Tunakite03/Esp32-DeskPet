@@ -8,7 +8,6 @@
 #include <math.h>
 #include "src/core/system/config.h"
 #include "src/core/system/timekeeping.h"
-#include "src/features/weather/weather_ca.h"
 
 namespace {
 constexpr char WEATHER_HOST[] = "api.open-meteo.com";
@@ -20,7 +19,8 @@ QueueHandle_t weatherResults = nullptr;
 
 bool plausible(const WeatherResult &result) {
   return isfinite(result.temperature) && result.temperature >= -90 && result.temperature <= 65 &&
-         result.humidity >= 0 && result.humidity <= 100 && result.code >= 0 && result.code <= 99;
+         result.humidity >= 0 && result.humidity <= 100 && result.rainChance >= 0 && result.rainChance <= 100 &&
+         result.code >= 0 && result.code <= 99;
 }
 
 // Network.hostByName() (used by HTTPClient) clears the lwIP DNS cache without
@@ -41,8 +41,11 @@ bool resolveHost(const char *host, IPAddress &address) {
 
 // Sends an HTTP/1.0 GET (so the body is never chunked) and skips the response
 // headers. Returns the status code, or -1 when the TLS connection failed.
+// The server is verified against the ESP-IDF root store (Mozilla's CA list built
+// into the core), so a change of certificate authority does not need a reflash.
 int httpsGet(NetworkClientSecure &client, const IPAddress &address, const String &path) {
-  if (!client.connect(address, 443, WEATHER_HOST, WEATHER_ROOT_CA, nullptr, nullptr)) return -1;
+  client.useBuiltinCACertBundle();
+  if (!client.connect(address, 443, WEATHER_HOST, nullptr, nullptr, nullptr)) return -1;
   client.print("GET " + path + " HTTP/1.0\r\nHost: " + WEATHER_HOST +
                "\r\nUser-Agent: DeskPet\r\nConnection: close\r\n\r\n");
   const String statusLine = client.readStringUntil('\n');
@@ -61,7 +64,8 @@ WeatherResult fetchWeather(uint8_t requestedPlace) {
   const Place &location = PLACES[requestedPlace];
   const String path = "/v1/forecast?latitude=" + String(location.latitude, 4) +
                       "&longitude=" + String(location.longitude, 4) +
-                      "&current=temperature_2m,relative_humidity_2m,weather_code&forecast_days=1";
+                      "&current=temperature_2m,relative_humidity_2m,weather_code"
+                      "&daily=precipitation_probability_max&timezone=auto&forecast_days=1";
   for (uint8_t attempt = 1; attempt <= 3; ++attempt) {
     if (WiFi.status() != WL_CONNECTED) { result.error = WeatherError::Network; return result; }
     int status = 0;
@@ -75,19 +79,28 @@ WeatherResult fetchWeather(uint8_t requestedPlace) {
     } else if ((status = httpsGet(client, address, path)) != 200) {
       result.error = WeatherError::Http;
     } else {
+      // Keep only the fields read below, so extra data in the response costs no heap.
+      JsonDocument filter;
+      filter["current"]["temperature_2m"] = true;
+      filter["current"]["relative_humidity_2m"] = true;
+      filter["current"]["weather_code"] = true;
+      filter["daily"]["precipitation_probability_max"] = true;
       JsonDocument json;
-      const DeserializationError parseError = deserializeJson(json, client);
+      const DeserializationError parseError =
+          deserializeJson(json, client, DeserializationOption::Filter(filter));
       if (parseError) {
         result.error = WeatherError::Json;
       } else {
         const JsonObjectConst current = json["current"].as<JsonObjectConst>();
+        const JsonVariantConst rainChance = json["daily"]["precipitation_probability_max"][0];
         if (!current["temperature_2m"].is<float>() || !current["relative_humidity_2m"].is<int>() ||
-            !current["weather_code"].is<int>()) {
+            !current["weather_code"].is<int>() || !rainChance.is<int>()) {
           result.error = WeatherError::Schema;
         } else {
           result.temperature = current["temperature_2m"].as<float>();
           result.humidity = current["relative_humidity_2m"].as<int>();
           result.code = current["weather_code"].as<int>();
+          result.rainChance = rainChance.as<int>();
           result.error = plausible(result) ? WeatherError::None : WeatherError::Schema;
           result.fetchedAt = millis();
         }
