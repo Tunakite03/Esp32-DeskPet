@@ -211,13 +211,16 @@ It needs Chrome or Edge on a computer (Web Serial).
 
 Open it online at <https://tunakite03.github.io/Esp32-DeskPet/web/>. The
 `Customizer` workflow (`.github/workflows/customizer.yml`) runs the page's
-tests on every pull request and push, and redeploys the page whenever `web/`
-or the asset pack changes on `master`.
+tests on every pull request and push, and redeploys the page (with the
+character gallery) whenever `web/` or the asset pack changes on `master`.
 
-To run it locally, serve the repository root over HTTP so the page can load
-the default pack:
+To run it locally, download the character gallery once (it is not committed;
+`web/mascots/` is git-ignored), then serve the repository root over HTTP so the
+page can load the default pack:
 
 ```bash
+pip install pillow
+python3 web/fetch_mascots.py
 python3 web/serve.py
 ```
 
@@ -226,13 +229,15 @@ Then open <http://localhost:8000/web/>. Use `web/serve.py` rather than
 `text/plain`, and the browser then refuses to run the page.
 
 - **Companions**: rename, reorder or remove them (3 to 16 in a pack). The
-  easiest way to add one is the [page-mascot gallery](https://koboyo.com/page-mascot):
-  press *Use* on a character, download its `<name>-directions.webp` and
-  `<name>-reactions.webp`, and choose both files in the customizer (the name is
-  filled in from the file name). Your own two 3×3 sprite sheets on a
-  transparent background work the same way (9 gaze directions, then the 9
-  reactions, in the order the page lists; see `deskpet/assets/page-mascot/cat-*.webp`).
-  A GIF, animated WebP or APNG also works and loops at 64×64 pixels.
+  **Gallery** tab holds all 58 [page-mascot](https://koboyo.com/page-mascot)
+  characters (animals, people, robots and fox styles): filter or search, tap
+  as many as there is room for, and press *Add*. `web/fetch_mascots.py`
+  downloads them from a pinned commit of `nilbuild/page-mascot`, so the
+  gallery only changes when that commit does. **Sprite sheets** takes your own
+  two 3×3 sheets on a transparent background (9 gaze directions, then the 9
+  reactions, in the order the page lists; see `deskpet/assets/page-mascot/cat-*.webp`);
+  the name is filled in from `<name>-directions.webp`. **Animation** takes a
+  GIF, animated WebP or APNG, which loops at 64×64 pixels.
 - **Ringtone**: pick an audio file and the part to keep (up to 30 seconds). It
   is converted to 16 kHz mono. Without one, the ringtone compiled into the
   firmware plays.

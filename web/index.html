@@ -8,7 +8,7 @@
   :root {
     --bg: #f6f5f2; --surface: #ffffff; --surface-2: #efede8; --text: #1d1c1a; --muted: #6b6862;
     --line: #dcd9d2; --accent: #2a6f97; --accent-text: #ffffff; --danger: #b3261e; --ok: #2e7d32;
-    --warn: #8a5a00; --radius: 12px;
+    --warn: #8a5a00; --radius: 12px; color-scheme: light dark;
   }
   @media (prefers-color-scheme: dark) {
     :root { --bg: #151514; --surface: #1f1e1c; --surface-2: #2a2926; --text: #ecebe8; --muted: #a3a09a;
@@ -52,10 +52,33 @@
                 align-self: center; }
   .pet input[type=text] { width: 100%; }
   .pet .actions { display: flex; gap: 6px; justify-content: center; }
-  .callout { background: var(--surface-2); border-radius: 10px; padding: 12px 14px; margin-bottom: 14px; }
-  .callout ol { margin: 6px 0 0; padding-left: 20px; }
-  .callout p { margin: 0; }
-  .tabs { display: flex; gap: 6px; margin-bottom: 12px; }
+  .gallery-tools { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between;
+                   margin-bottom: 10px; }
+  .gallery-tools input[type=search] { font: inherit; color: var(--text); background: var(--bg); flex: 1 1 180px;
+                   max-width: 260px; border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chips button { border-radius: 999px; padding: 4px 12px; font-size: 14px; }
+  .chips button[aria-pressed=true] { background: var(--text); color: var(--bg); border-color: var(--text); }
+  .chips .count { opacity: .6; margin-left: 4px; font-size: 12px; }
+  .gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 8px;
+             max-height: 392px; overflow-y: auto; padding: 2px; overscroll-behavior: contain; }
+  .tile { position: relative; display: flex; flex-direction: column; align-items: center; gap: 2px;
+          padding: 8px 4px 6px; border-radius: 10px; background: var(--bg); border: 2px solid transparent;
+          font-size: 13px; }
+  .tile img { width: 72px; height: 72px; display: block; }
+  .tile:hover { border-color: var(--line); }
+  .tile[aria-pressed=true] { border-color: var(--accent); background: var(--surface-2); }
+  .tile[aria-pressed=true]::after { content: "✓"; position: absolute; top: 5px; right: 5px; width: 20px; height: 20px;
+          border-radius: 50%; background: var(--accent); color: var(--accent-text); font-size: 12px; font-weight: 700;
+          display: grid; place-items: center; }
+  .tile .badge { position: absolute; top: 5px; left: 5px; font-size: 10px; padding: 0 5px; border-radius: 4px;
+          background: var(--surface-2); color: var(--muted); }
+  .tile:disabled { opacity: .35; }
+  .gallery-message { padding: 24px 8px; text-align: center; }
+  .gallery-bar { position: sticky; bottom: 0; display: flex; flex-wrap: wrap; gap: 10px; align-items: center;
+                 justify-content: space-between; margin-top: 10px; padding: 10px 0 2px; background: var(--surface);
+                 border-top: 1px solid var(--line); }
+  .tabs { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
   .tabs button[aria-selected=true] { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
   .panel[hidden] { display: none; }
   .grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; margin-bottom: 12px; }
@@ -69,7 +92,12 @@
   pre.log { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 10px; font-size: 12px;
             max-height: 220px; overflow: auto; white-space: pre-wrap; margin: 10px 0 0; }
   code { background: var(--surface-2); padding: 1px 5px; border-radius: 4px; font-size: 13px; }
-  @media (max-width: 560px) { ol.labels { columns: 2; } }
+  @media (max-width: 560px) {
+    ol.labels { columns: 2; }
+    .gallery { grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); max-height: 340px; }
+    .tile img { width: 60px; height: 60px; }
+    .gallery-tools input[type=search] { max-width: none; }
+  }
 </style>
 </head>
 <body>
@@ -99,32 +127,47 @@
   </section>
 
   <section>
-    <h2>Add a companion</h2>
-    <div class="tabs" role="tablist">
-      <button role="tab" aria-selected="true" data-panel="posed-panel">Sprite sheets</button>
-      <button role="tab" aria-selected="false" data-panel="animated-panel">Animated image</button>
+    <div class="row spread">
+      <h2>Add a companion</h2>
+      <span id="slots-left" class="muted"></span>
     </div>
-    <div id="posed-panel" class="panel">
-      <div class="callout" data-test="mascot-gallery">
-        <p><strong>Get ready-made characters</strong> from the
-          <a href="https://koboyo.com/page-mascot" target="_blank" rel="noopener">page-mascot gallery</a>
-          (53 animals, people and robots, in several styles).</p>
-        <ol>
-          <li>Hover a character, press <em>Use</em>, and download both
-            <code>&lt;name&gt;-directions.webp</code> and <code>&lt;name&gt;-reactions.webp</code>.</li>
-          <li>Choose both files below (together in either box works), then press <em>Add companion</em>.
-            The name is filled in from the file name.</li>
-        </ol>
+    <div class="tabs" role="tablist">
+      <button id="gallery-tab" role="tab" aria-selected="true" data-panel="gallery-panel">Gallery</button>
+      <button role="tab" aria-selected="false" data-panel="posed-panel">Sprite sheets</button>
+      <button role="tab" aria-selected="false" data-panel="animated-panel">Animation</button>
+    </div>
+    <div id="gallery-panel" class="panel" data-test="mascot-gallery">
+      <div class="gallery-tools">
+        <div id="gallery-groups" class="chips" role="group" aria-label="Show"></div>
+        <input id="gallery-search" type="search" placeholder="Search characters" aria-label="Search characters">
       </div>
-      <p>Your own artwork works too: two square sheets of 3×3 cells on a transparent background, like
+      <div id="gallery" class="gallery" aria-label="Characters"></div>
+      <p id="gallery-message" class="muted gallery-message" hidden></p>
+      <div class="gallery-bar">
+        <span id="gallery-picked" class="muted">Tap characters to pick them.</span>
+        <div class="row">
+          <button id="gallery-clear" disabled>Clear</button>
+          <button id="gallery-add" class="primary" disabled>Add</button>
+        </div>
+      </div>
+      <p class="muted note">Characters by Kamran Ahmed from
+        <a href="https://koboyo.com/page-mascot" target="_blank" rel="noopener">page-mascot</a>
+        (<a href="mascots/LICENSE" target="_blank">MIT license</a>). Each follows your finger on the board and
+        reacts to taps.</p>
+    </div>
+    <div id="posed-panel" class="panel" hidden>
+      <p>Two square sheets of 3×3 cells on a transparent background, like
         <a href="../deskpet/assets/page-mascot/cat-directions.webp" target="_blank">cat-directions</a> and
         <a href="../deskpet/assets/page-mascot/cat-reactions.webp" target="_blank">cat-reactions</a>.
-        The pet follows your finger and reacts to taps. Cells, left to right and top to bottom:</p>
+        Sheets downloaded from <a href="https://koboyo.com/page-mascot" target="_blank" rel="noopener">page-mascot</a>
+        work as they are. Cells, left to right and top to bottom:</p>
       <ol id="pose-labels" class="labels"></ol>
       <div class="grid-2">
         <label class="field">Directions sheet (cells 1–9)<input id="directions-file" type="file" accept="image/*" multiple></label>
         <label class="field">Reactions sheet (cells 10–18)<input id="reactions-file" type="file" accept="image/*" multiple></label>
       </div>
+      <p class="muted">Choosing both files in either box works; the name is filled in from
+        <code>&lt;name&gt;-directions.webp</code>.</p>
       <div class="row">
         <input id="posed-name" type="text" maxlength="12" placeholder="Name">
         <button id="add-posed" class="primary">Add companion</button>

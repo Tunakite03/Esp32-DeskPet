@@ -11,6 +11,7 @@ import {
 /** @typedef {import("./pack.js").PackPet} PackPet */
 
 const DEFAULT_PACK_URL = "../deskpet/assets/pets.bin";
+const GALLERY_URL = "mascots/";  // written by fetch_mascots.py
 const ESPTOOL_URL = "https://unpkg.com/esptool-js@0.7.0/bundle.js";
 const ESPRESSIF_VID = 0x303a;
 const FLASH_BAUD = 921600;
@@ -199,8 +200,11 @@ function renderPets() {
     list.append(card);
   });
   $("pet-count").textContent = `${pack.pets.length} of ${MAX_PETS} (at least ${MIN_PETS})`;
-  $("add-posed").disabled = pack.pets.length >= MAX_PETS;
-  $("add-animated").disabled = pack.pets.length >= MAX_PETS;
+  const free = MAX_PETS - pack.pets.length;
+  $("slots-left").textContent = free === 0 ? "The pack is full" : `Room for ${free} more`;
+  $("add-posed").disabled = adding || free === 0;
+  $("add-animated").disabled = adding || free === 0;
+  refreshGallery();
 }
 
 // ---------------------------------------------------------------------------
@@ -224,12 +228,12 @@ function pixelsOf(source, width, height) {
  * cell's opaque pixels, plus a margin) and scales them to 144 px, as
  * build_pet_assets.mascot_frames does.
  * @param {string} name
- * @param {File} directionsFile
- * @param {File} reactionsFile
+ * @param {Blob} directionsSheet
+ * @param {Blob} reactionsSheet
  * @returns {Promise<PackPet>}
  */
-async function makePosedPet(name, directionsFile, reactionsFile) {
-  const sheets = await Promise.all([directionsFile, reactionsFile].map((file) => createImageBitmap(file)));
+async function makePosedPet(name, directionsSheet, reactionsSheet) {
+  const sheets = await Promise.all([directionsSheet, reactionsSheet].map((sheet) => createImageBitmap(sheet)));
   const [first] = sheets;
   for (const sheet of sheets) {
     if (sheet.width !== sheet.height || sheet.width !== first.width || sheet.width < 3) {
@@ -347,6 +351,7 @@ async function addPet(nameId, make) {
   // A second click while converting would add the same companion twice.
   adding = true;
   $("add-posed").disabled = $("add-animated").disabled = true;
+  refreshGallery();
   try {
     const pet = await make();
     if (!pet) return;
@@ -356,6 +361,155 @@ async function addPet(nameId, make) {
     setStatus("add-status", `${name} added.`, "ok");
   } catch (error) {
     setStatus("add-status", describe(error), "error");
+  } finally {
+    adding = false;
+    renderPets();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Gallery of page-mascot characters
+
+/**
+ * @typedef {{ id: string, name: string, group: string, tile: HTMLButtonElement, badge: HTMLElement }} Mascot
+ */
+
+/** @type {Mascot[]} */
+let mascots = [];
+/** @type {Mascot[]} picked, in the order they were tapped */
+let picked = [];
+let galleryGroup = "All";
+
+/** @param {string} name */
+const nameKey = (name) => name.trim().toLowerCase();
+
+async function loadGallery() {
+  /** @type {{ groups: { name: string, mascots: { id: string, name: string }[] }[] }} */
+  let index;
+  try {
+    const response = await fetch(`${GALLERY_URL}index.json`, { cache: "no-cache" });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    index = await response.json();
+  } catch {
+    const message = $("gallery-message");
+    message.hidden = false;
+    message.innerHTML = "The character gallery has not been downloaded. Run " +
+      "<code>python web/fetch_mascots.py</code> and reload, or add your own sprite sheets.";
+    $("gallery-search").disabled = true;
+    return;
+  }
+
+  mascots = index.groups.flatMap((group) => group.mascots.map(({ id, name }) => {
+    const tile = document.createElement("button");
+    tile.className = "tile";
+    tile.type = "button";
+    tile.dataset.test = "mascot-tile";
+    tile.dataset.id = id;
+    const image = document.createElement("img");
+    image.src = `${GALLERY_URL}thumbs/${id}.webp`;
+    image.alt = "";
+    image.loading = "lazy";
+    image.width = image.height = 72;
+    const label = document.createElement("span");
+    label.textContent = name;
+    const badge = document.createElement("span");
+    badge.className = "badge";
+    badge.textContent = "In pack";
+    badge.hidden = true;
+    tile.append(image, label, badge);
+    /** @type {Mascot} */
+    const mascot = { id, name, group: group.name, tile, badge };
+    tile.addEventListener("click", () => togglePick(mascot));
+    return mascot;
+  }));
+  $("gallery").replaceChildren(...mascots.map((mascot) => mascot.tile));
+
+  const groups = [["All", mascots.length], ...index.groups.map((group) => [group.name, group.mascots.length])];
+  $("gallery-groups").replaceChildren(...groups.map(([name, count]) => {
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.dataset.group = String(name);
+    chip.append(String(name));
+    const number = document.createElement("span");
+    number.className = "count";
+    number.textContent = String(count);
+    chip.append(number);
+    chip.addEventListener("click", () => {
+      galleryGroup = String(name);
+      refreshGallery();
+    });
+    return chip;
+  }));
+  refreshGallery();
+}
+
+/** @param {Mascot} mascot */
+function togglePick(mascot) {
+  if (picked.includes(mascot)) picked = picked.filter((other) => other !== mascot);
+  else if (picked.length < MAX_PETS - pack.pets.length) picked = [...picked, mascot];
+  setStatus("add-status", "", "");
+  refreshGallery();
+}
+
+/** Applies the filter, the picks, the free slots and the "In pack" badges to the tiles. */
+function refreshGallery() {
+  if (mascots.length === 0) return;
+  const query = nameKey($("gallery-search").value);
+  const inPack = new Set(pack.pets.map((pet) => nameKey(pet.name)));
+  const free = MAX_PETS - pack.pets.length;
+  let shown = 0;
+  for (const mascot of mascots) {
+    const visible = (galleryGroup === "All" || mascot.group === galleryGroup) &&
+      (!query || nameKey(mascot.name).includes(query) || mascot.id.includes(query));
+    const isPicked = picked.includes(mascot);
+    mascot.tile.hidden = !visible;
+    mascot.tile.setAttribute("aria-pressed", String(isPicked));
+    mascot.tile.disabled = adding || (!isPicked && picked.length >= free);
+    mascot.tile.title = isPicked ? `${mascot.name}: picked` : mascot.name;
+    mascot.badge.hidden = !inPack.has(nameKey(mascot.name));
+    if (visible) ++shown;
+  }
+  for (const chip of /** @type {HTMLButtonElement[]} */ ([...$("gallery-groups").children])) {
+    chip.setAttribute("aria-pressed", String(chip.dataset.group === galleryGroup));
+  }
+  const message = $("gallery-message");
+  message.hidden = shown > 0;
+  if (shown === 0) message.textContent = "No character matches.";
+
+  $("gallery-picked").textContent = picked.length > 0
+    ? `Picked: ${picked.map((mascot) => mascot.name).join(", ")}`
+    : free === 0 ? "The pack is full. Remove a companion to add another." : "Tap characters to pick them.";
+  $("gallery-clear").disabled = adding || picked.length === 0;
+  $("gallery-add").disabled = adding || picked.length === 0;
+  $("gallery-add").textContent = picked.length > 1 ? `Add ${picked.length} companions` : "Add companion";
+}
+
+async function addFromGallery() {
+  if (adding || picked.length === 0) return;
+  const queue = picked.slice(0, MAX_PETS - pack.pets.length);
+  adding = true;
+  refreshGallery();
+  $("add-posed").disabled = $("add-animated").disabled = true;
+  /** @type {string[]} */
+  const added = [];
+  try {
+    for (const [index, mascot] of queue.entries()) {
+      setStatus("add-status", `Converting ${mascot.name}` +
+                (queue.length > 1 ? ` (${index + 1} of ${queue.length})…` : "…"), "");
+      const sheets = await Promise.all(["directions", "reactions"].map(async (sheet) => {
+        const response = await fetch(`${GALLERY_URL}${mascot.id}-${sheet}.webp`);
+        if (!response.ok) throw new PackError(`${mascot.name}: the ${sheet} sheet did not load (HTTP ${response.status})`);
+        return response.blob();
+      }));
+      const pet = await makePosedPet(mascot.name, sheets[0], sheets[1]);
+      pack = { ...pack, pets: [...pack.pets, pet] };
+      picked = picked.filter((other) => other !== mascot);
+      added.push(mascot.name);
+      refreshBuild();
+    }
+    setStatus("add-status", `Added ${added.join(", ")}.`, "ok");
+  } catch (error) {
+    setStatus("add-status", (added.length ? `Added ${added.join(", ")}. ` : "") + describe(error), "error");
   } finally {
     adding = false;
     renderPets();
@@ -726,6 +880,12 @@ function wire() {
     }
     return makePosedPet($("posed-name").value.trim(), directions, reactions);
   }));
+  $("gallery-add").addEventListener("click", addFromGallery);
+  $("gallery-clear").addEventListener("click", () => {
+    picked = [];
+    refreshGallery();
+  });
+  $("gallery-search").addEventListener("input", refreshGallery);
   $("add-animated").addEventListener("click", () => addPet("animated-name", async () => {
     const file = $("animated-file").files?.[0];
     if (!file) {
@@ -757,3 +917,4 @@ function wire() {
 
 wire();
 loadDefaultPack();
+loadGallery();

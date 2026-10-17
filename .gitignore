@@ -84,3 +84,6 @@ desktop.ini
 *.tmp
 *~
 page-mascot-tree.json
+
+# Customizer gallery, downloaded by web/fetch_mascots.py
+web/mascots/

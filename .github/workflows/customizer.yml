@@ -48,12 +48,20 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Download the page-mascot gallery
+        run: |
+          pip install pillow
+          python web/fetch_mascots.py
       # The page loads ../deskpet/assets/pets.bin and links the example sheets,
       # so the site keeps the repository layout for those paths.
       - name: Assemble the site
         run: |
           mkdir -p _site/web _site/deskpet/assets
           cp web/index.html web/app.js web/pack.js _site/web/
+          cp -r web/mascots _site/web/
           cp deskpet/assets/pets.bin _site/deskpet/assets/
           cp -r deskpet/assets/page-mascot _site/deskpet/assets/
           cat > _site/index.html <<'HTML'
