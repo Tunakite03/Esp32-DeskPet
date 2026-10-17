@@ -14,6 +14,9 @@ bool audioIsReady();
 bool micReady();
 // 0 to 100. Zero also switches the amplifier off.
 void setAudioGain(uint8_t gain);
+// Replaces the built-in alarm ringtone (mono 16 kHz). The buffer must stay valid
+// for the rest of the run; call it before the first sound.
+void setRingtone(const int16_t *samples, uint32_t count);
 // Plays the alarm ringtone once; used by the test buttons and the microphone test.
 // Pre-empts a recording.
 void requestSound();

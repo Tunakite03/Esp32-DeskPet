@@ -468,6 +468,12 @@ void appSetup() {
   Wire.setTimeOut(20);
   if (!initAudio()) logError("audio", "Speaker disabled because initialization failed");
   else initTalk();
+  // A ringtone in the asset pack (written by the web customizer) replaces the built-in one.
+  const AssetRingtone ringtone = assetRingtone();
+  if (ringtone.count != 0) {
+    setRingtone(ringtone.samples, ringtone.count);
+    Serial.printf("{\"event\":\"custom_ringtone\",\"samples\":%lu}\n", static_cast<unsigned long>(ringtone.count));
+  }
   // Touch sampling starts after the codec setup, the only other user of the I2C bus.
   if (!startTouchInput()) { logError("touch", "Touch task allocation failed"); fatalError = true; return; }
   showBootProgress("Connecting", 75);

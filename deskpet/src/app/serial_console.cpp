@@ -114,9 +114,10 @@ void printPetStatus(const AppState &state) {
 
 void printAssetStatus(const AppState &state) {
   Serial.printf("{\"assets_ready\":%s,\"asset_count\":%u,\"asset_bytes\":%lu,\"mascot\":%u,\"frame\":%lu,"
-                "\"picker_page\":%u}\n",
+                "\"picker_page\":%u,\"ringtone_samples\":%lu}\n",
                 petAssetsReady() ? "true" : "false", petAssetCount(), static_cast<unsigned long>(petAssetBytes()),
-                state.pet.mascot, static_cast<unsigned long>(petVisualFrame(state, millis())), state.pet.pickerPage);
+                state.pet.mascot, static_cast<unsigned long>(petVisualFrame(state, millis())), state.pet.pickerPage,
+                static_cast<unsigned long>(assetRingtone().count));
 }
 
 void printSettingsStatus(const AppState &state) {
