@@ -36,12 +36,16 @@ uint16_t blend565(uint16_t fg, uint16_t bg, uint8_t alpha) {
 
 // How much of the pixel at (px, py) the pill covers, 0-15, so its rounded ends are anti-aliased.
 uint8_t pillCoverage(const Rect &pill, int px, int py) {
+  // Pixels outside the bounding box are never covered: this skips the other tabs' labels.
+  if (!pill.contains(px, py)) return 0;
   const float radius = pill.h / 2.0f;
   const float left = pill.x + radius, right = pill.right() - radius;
   const float x = px + 0.5f, y = py + 0.5f;
   const float dx = x < left ? left - x : x > right ? x - right : 0;
   const float dy = y - (pill.y + radius);
-  const float edge = radius + 0.5f - sqrtf(dx * dx + dy * dy);
+  // Between the rounded ends the distance to the centre line is just |dy|.
+  const float distance = dx == 0 ? fabsf(dy) : sqrtf(dx * dx + dy * dy);
+  const float edge = radius + 0.5f - distance;
   return edge <= 0 ? 0 : edge >= 1 ? 15 : static_cast<uint8_t>(edge * 15 + 0.5f);
 }
 
