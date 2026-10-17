@@ -87,3 +87,6 @@ page-mascot-tree.json
 
 # Customizer gallery, downloaded by web/fetch_mascots.py
 web/mascots/
+
+# Release firmware for the customizer, copied in by the Pages workflow
+web/firmware/

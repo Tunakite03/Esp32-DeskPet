@@ -1,233 +1,1448 @@
 <!doctype html>
 <html lang="en">
+
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>DeskPet Customizer</title>
-<style>
-  :root {
-    --bg: #f6f5f2; --surface: #ffffff; --surface-2: #efede8; --text: #1d1c1a; --muted: #6b6862;
-    --line: #dcd9d2; --accent: #2a6f97; --accent-text: #ffffff; --danger: #b3261e; --ok: #2e7d32;
-    --warn: #8a5a00; --radius: 12px; color-scheme: light dark;
-  }
-  @media (prefers-color-scheme: dark) {
-    :root { --bg: #151514; --surface: #1f1e1c; --surface-2: #2a2926; --text: #ecebe8; --muted: #a3a09a;
-            --line: #3a3834; --accent: #5aa9d6; --accent-text: #0b1d28; --danger: #f2827a; --ok: #81c784;
-            --warn: #e0b45a; }
-  }
-  * { box-sizing: border-box; }
-  body { margin: 0; background: var(--bg); color: var(--text);
-         font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
-  main { max-width: 920px; margin: 0 auto; padding: 24px 16px 64px; }
-  h1 { font-size: 26px; margin: 0 0 4px; }
-  h2 { font-size: 18px; margin: 0 0 12px; }
-  p { margin: 0 0 10px; }
-  a { color: var(--accent); }
-  .lead { color: var(--muted); margin-bottom: 20px; }
-  section { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
-            padding: 18px; margin-bottom: 16px; }
-  .row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
-  .row.bottom { align-items: flex-end; }
-  .row > p { margin: 0; }
-  .spread { justify-content: space-between; }
-  .stack { margin-bottom: 12px; }
-  .note { margin-top: 10px; }
-  .meter[hidden] { display: none; }
-  .muted { color: var(--muted); font-size: 13px; }
-  button, .button { font: inherit; border: 1px solid var(--line); background: var(--surface-2); color: var(--text);
-                    border-radius: 8px; padding: 7px 14px; cursor: pointer; }
-  button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); font-weight: 600; }
-  button.icon { padding: 4px 10px; }
-  button:disabled { opacity: .45; cursor: not-allowed; }
-  input[type=text], input[type=number] { font: inherit; color: var(--text); background: var(--bg);
-                    border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; }
-  input[type=number] { width: 80px; }
-  input:invalid { border-color: var(--danger); }
-  input[type=file] { font-size: 13px; max-width: 100%; }
-  label.field { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--muted); }
-  .pets { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; }
-  .pet { border: 1px solid var(--line); border-radius: 10px; padding: 12px; display: flex; flex-direction: column;
-         gap: 8px; background: var(--bg); }
-  .pet canvas { width: 96px; height: 96px; image-rendering: pixelated; background: #000; border-radius: 8px;
-                align-self: center; }
-  .pet input[type=text] { width: 100%; }
-  .pet .actions { display: flex; gap: 6px; justify-content: center; }
-  .gallery-tools { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between;
-                   margin-bottom: 10px; }
-  .gallery-tools input[type=search] { font: inherit; color: var(--text); background: var(--bg); flex: 1 1 180px;
-                   max-width: 260px; border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; }
-  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
-  .chips button { border-radius: 999px; padding: 4px 12px; font-size: 14px; }
-  .chips button[aria-pressed=true] { background: var(--text); color: var(--bg); border-color: var(--text); }
-  .chips .count { opacity: .6; margin-left: 4px; font-size: 12px; }
-  .gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 8px;
-             max-height: 392px; overflow-y: auto; padding: 2px; overscroll-behavior: contain; }
-  .tile { position: relative; display: flex; flex-direction: column; align-items: center; gap: 2px;
-          padding: 8px 4px 6px; border-radius: 10px; background: var(--bg); border: 2px solid transparent;
-          font-size: 13px; }
-  .tile img { width: 72px; height: 72px; display: block; }
-  .tile:hover { border-color: var(--line); }
-  .tile[aria-pressed=true] { border-color: var(--accent); background: var(--surface-2); }
-  .tile[aria-pressed=true]::after { content: "✓"; position: absolute; top: 5px; right: 5px; width: 20px; height: 20px;
-          border-radius: 50%; background: var(--accent); color: var(--accent-text); font-size: 12px; font-weight: 700;
-          display: grid; place-items: center; }
-  .tile .badge { position: absolute; top: 5px; left: 5px; font-size: 10px; padding: 0 5px; border-radius: 4px;
-          background: var(--surface-2); color: var(--muted); }
-  .tile:disabled { opacity: .35; }
-  .gallery-message { padding: 24px 8px; text-align: center; }
-  .gallery-bar { position: sticky; bottom: 0; display: flex; flex-wrap: wrap; gap: 10px; align-items: center;
-                 justify-content: space-between; margin-top: 10px; padding: 10px 0 2px; background: var(--surface);
-                 border-top: 1px solid var(--line); }
-  .tabs { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
-  .tabs button[aria-selected=true] { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
-  .panel[hidden] { display: none; }
-  .grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; margin-bottom: 12px; }
-  ol.labels { columns: 3; margin: 6px 0 12px; padding-left: 20px; font-size: 13px; color: var(--muted); }
-  .meter { height: 10px; background: var(--surface-2); border-radius: 5px; overflow: hidden; margin: 8px 0; }
-  .meter > div { height: 100%; background: var(--accent); width: 0; }
-  .status { font-size: 14px; margin-top: 10px; min-height: 1.5em; }
-  .status.error { color: var(--danger); }
-  .status.ok { color: var(--ok); }
-  .status.warn { color: var(--warn); }
-  pre.log { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 10px; font-size: 12px;
-            max-height: 220px; overflow: auto; white-space: pre-wrap; margin: 10px 0 0; }
-  code { background: var(--surface-2); padding: 1px 5px; border-radius: 4px; font-size: 13px; }
-  @media (max-width: 560px) {
-    ol.labels { columns: 2; }
-    .gallery { grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); max-height: 340px; }
-    .tile img { width: 60px; height: 60px; }
-    .gallery-tools input[type=search] { max-width: none; }
-  }
-</style>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>DeskPet Customizer</title>
+  <script>
+    try { if (localStorage.getItem("deskpet-theme") === "dark") document.documentElement.dataset.theme = "dark"; }
+    catch { /* storage blocked: stay light */ }
+  </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet"
+    href="https://fonts.googleapis.com/css2?family=Lexend:wght@600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap">
+  <style>
+    /* Tokens from the "Oxford 5000 Study Hub" design system (paper and ink):
+     warm paper, 2px ink borders, zero-blur offset shadows, one coral action per screen. */
+    :root {
+      color-scheme: light;
+      --background: #f3efe6;
+      --foreground: #17201d;
+      --card: #fffdf8;
+      --secondary: #e7dfd1;
+      --muted: #eae5db;
+      --muted-foreground: #53605a;
+      --accent: #dcece6;
+      --accent-foreground: #174d48;
+      --primary: #247b79;
+      --primary-foreground: #ffffff;
+      --action: #e96b4f;
+      --action-foreground: #ffffff;
+      --gold: #f1c75b;
+      --destructive: #b44235;
+      --ok: #3f6b52;
+      --warn: #7a5c2e;
+      --border: #d3cabd;
+      --input: #c8bfb2;
+      --ring: #17635e;
+      --hard-shadow: #17201d;
+      --paper-highlight: #fff8df;
+      --sketch-hard: 2px 2px 0 var(--hard-shadow);
+      --sketch-button: 3px 3px 0 var(--hard-shadow);
+      --sketch-card: 6px 6px 0 var(--secondary);
+      --sketch-border: 2px 2px 0 var(--border);
+      --paper-sm: 8px 6px 7px 5px;
+      --paper-md: 10px 8px 11px 9px;
+      --paper-lg: 12px 10px 13px 11px;
+      --paper-xl: 14px 12px 15px 13px;
+      --paper-2xl: 18px 16px 20px 17px;
+      --radius-md: .5rem;
+      --radius-lg: .625rem;
+      --radius-xl: .875rem;
+      --font-display: "Lexend", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+      --font-body: "Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+      --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+
+
+    /* Light is the default; the moon button in the top bar switches to "Ink night". */
+    :root[data-theme="dark"] {
+      color-scheme: dark;
+      --background: #151b19;
+      --foreground: #f5efe4;
+      --card: #232b27;
+      --secondary: #303a34;
+      --muted: #29332e;
+      --muted-foreground: #bdc7be;
+      --accent: #315046;
+      --accent-foreground: #eff9f0;
+      --primary: #78c7b8;
+      --primary-foreground: #10221e;
+      --action: #f0785f;
+      --action-foreground: #ffffff;
+      --destructive: #f08a76;
+      --ok: #92bba4;
+      --warn: #c9b18f;
+      --border: #526158;
+      --input: #66756b;
+      --ring: #f1c75b;
+      --hard-shadow: #0c1110;
+      --paper-highlight: #3a3021;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    [hidden] {
+      display: none !important;
+    }
+
+    html {
+      scroll-padding-top: 80px;
+    }
+
+    body {
+      margin: 0;
+      background: var(--background);
+      color: var(--foreground);
+      font: 500 15px/1.55 var(--font-body);
+      -webkit-font-smoothing: antialiased;
+      font-feature-settings: "calt" 0;
+    }
+
+    h1,
+    h2,
+    h3 {
+      font-family: var(--font-display);
+      letter-spacing: 0;
+      line-height: 1.25;
+      margin: 0;
+    }
+
+    h1 {
+      font-size: 30px;
+      font-weight: 800;
+      line-height: 1.2;
+    }
+
+    h2 {
+      font-size: 20px;
+      font-weight: 700;
+    }
+
+    h3 {
+      font-size: 16px;
+      font-weight: 700;
+    }
+
+    p {
+      margin: 0 0 10px;
+    }
+
+    a {
+      color: var(--primary);
+      font-weight: 600;
+      text-underline-offset: 3px;
+    }
+
+    code {
+      font: 13px var(--font-mono);
+      background: var(--muted);
+      padding: 1px 6px;
+      border-radius: 6px;
+    }
+
+    :focus-visible {
+      outline: 2px solid var(--ring);
+      outline-offset: 3px;
+    }
+
+    .i {
+      width: 18px;
+      height: 18px;
+      flex: none;
+      stroke: currentColor;
+      fill: none;
+      stroke-width: 2;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    /* Shell */
+    .topbar {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      background: var(--background);
+      border-bottom: 2px solid var(--foreground);
+    }
+
+    .topbar-inner {
+      max-width: 960px;
+      margin: 0 auto;
+      padding: 10px 16px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      text-decoration: none;
+      color: var(--foreground);
+    }
+
+    .brand-tile {
+      width: 38px;
+      height: 38px;
+      display: grid;
+      place-items: center;
+      background: var(--action);
+      color: #fffdf8;
+      border: 2px solid var(--foreground);
+      border-radius: var(--paper-sm);
+      box-shadow: var(--sketch-button);
+      transform: rotate(-2deg);
+    }
+
+    .brand-tile .i {
+      width: 22px;
+      height: 22px;
+    }
+
+    .wordmark {
+      font: 800 18px/1 var(--font-display);
+    }
+
+    .wordmark span {
+      color: var(--action);
+    }
+
+    .theme-toggle {
+      width: 44px;
+      min-height: 44px;
+      padding: 0;
+      border: 2px solid var(--foreground);
+      border-radius: var(--paper-md);
+      background: var(--card);
+      box-shadow: var(--sketch-border);
+    }
+
+    .theme-toggle .sun,
+    :root[data-theme="dark"] .theme-toggle .moon {
+      display: none;
+    }
+
+    :root[data-theme="dark"] .theme-toggle .sun {
+      display: block;
+    }
+
+    .topbar-inner>.views {
+      margin-left: auto;
+    }
+
+    .views {
+      display: flex;
+      gap: 10px;
+    }
+
+    .views [role=tab] {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font: 700 13px/1 var(--font-body);
+      color: var(--foreground);
+      background: var(--card);
+      border: 2px solid var(--foreground);
+      border-radius: var(--paper-md);
+      padding: 10px 14px;
+      min-height: 44px;
+      cursor: pointer;
+      box-shadow: var(--sketch-border);
+      transition: transform .12s, box-shadow .12s;
+    }
+
+    .views [role=tab]:hover {
+      transform: translateY(-2px);
+    }
+
+    .views [role=tab][aria-selected=true] {
+      background: var(--paper-highlight);
+      box-shadow: var(--sketch-hard);
+    }
+
+    .views [role=tab][aria-selected=true] .i {
+      color: var(--primary);
+    }
+
+    main {
+      max-width: 960px;
+      margin: 0 auto;
+      padding: 28px 16px 72px;
+    }
+
+    .view[hidden] {
+      display: none;
+    }
+
+    .intro {
+      margin: 4px 0 24px;
+    }
+
+    .eyebrow {
+      font: 800 10px/14px var(--font-body);
+      letter-spacing: .05em;
+      text-transform: uppercase;
+      color: var(--muted-foreground);
+      margin: 0 0 8px;
+    }
+
+    .lead {
+      font-size: 16px;
+      color: var(--muted-foreground);
+      max-width: 680px;
+      margin: 10px 0 0;
+    }
+
+    .card {
+      background: var(--card);
+      border: 2px solid var(--foreground);
+      border-radius: var(--paper-xl);
+      box-shadow: var(--sketch-card);
+      padding: 20px;
+      margin-bottom: 22px;
+    }
+
+    .card-head {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px 12px;
+      align-items: baseline;
+      justify-content: space-between;
+      margin-bottom: 12px;
+    }
+
+    .step {
+      display: inline-grid;
+      place-items: center;
+      width: 26px;
+      height: 26px;
+      margin-right: 8px;
+      border: 2px solid var(--foreground);
+      border-radius: 50%;
+      background: var(--paper-highlight);
+      font: 800 13px/1 var(--font-display);
+      vertical-align: 2px;
+    }
+
+    /* Layout helpers used by app.js too */
+    .row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
+    }
+
+    .row.bottom {
+      align-items: flex-end;
+    }
+
+    .row>p {
+      margin: 0;
+    }
+
+    .spread {
+      justify-content: space-between;
+    }
+
+    .stack {
+      margin-bottom: 12px;
+    }
+
+    .note {
+      margin-top: 12px;
+    }
+
+    .muted {
+      color: var(--muted-foreground);
+      font-size: 14px;
+    }
+
+    /* Controls */
+    button,
+    .button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      font: 700 13px/1.2 var(--font-body);
+      color: var(--foreground);
+      background: var(--card);
+      border: 1px solid var(--input);
+      border-radius: var(--radius-lg);
+      padding: 9px 14px;
+      min-height: 40px;
+      cursor: pointer;
+      box-shadow: 0 2px 0 var(--border);
+      transition: transform .12s, box-shadow .12s, background .12s;
+    }
+
+    button:hover:not(:disabled),
+    .button:hover {
+      background: var(--muted);
+    }
+
+    button.primary {
+      background: var(--primary);
+      color: var(--primary-foreground);
+      border: 2px solid var(--foreground);
+      border-radius: var(--paper-md);
+      box-shadow: var(--sketch-hard);
+    }
+
+    button.primary:hover:not(:disabled) {
+      background: var(--primary);
+      transform: translateY(-2px);
+    }
+
+    button.action {
+      background: var(--action);
+      color: var(--action-foreground);
+      border: 2px solid var(--foreground);
+      border-radius: var(--paper-md);
+      box-shadow: var(--sketch-button);
+      font-size: 15px;
+      font-weight: 800;
+      padding: 12px 22px;
+      min-height: 48px;
+    }
+
+    button.action:hover:not(:disabled) {
+      background: var(--action);
+      transform: translateY(-2px);
+    }
+
+    button.primary:active:not(:disabled),
+    button.action:active:not(:disabled) {
+      transform: translateY(1px);
+      box-shadow: none;
+    }
+
+    button.icon {
+      min-height: 32px;
+      padding: 4px 10px;
+    }
+
+    button:disabled {
+      opacity: .45;
+      cursor: not-allowed;
+      box-shadow: none;
+      transform: none;
+    }
+
+    input[type=text],
+    input[type=number],
+    input[type=search] {
+      font: 500 14px var(--font-body);
+      color: var(--foreground);
+      background: var(--card);
+      min-height: 40px;
+      border: 1px solid var(--input);
+      border-radius: var(--radius-md);
+      padding: 7px 11px;
+    }
+
+    input[type=number] {
+      width: 90px;
+    }
+
+    input:invalid {
+      border-color: var(--destructive);
+    }
+
+    input[type=file] {
+      font: 500 13px var(--font-body);
+      max-width: 100%;
+      color: var(--muted-foreground);
+    }
+
+    input[type=file]::file-selector-button {
+      font: 700 13px var(--font-body);
+      color: var(--foreground);
+      background: var(--muted);
+      border: 1px solid var(--input);
+      border-radius: var(--radius-md);
+      padding: 7px 12px;
+      margin-right: 10px;
+      cursor: pointer;
+    }
+
+    label.field {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      font: 600 12px/1.3 var(--font-body);
+      color: var(--muted-foreground);
+    }
+
+    /* Firmware choices */
+    .choices {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 14px;
+    }
+
+    .choice {
+      position: relative;
+      display: flex;
+      gap: 12px;
+      padding: 16px;
+      cursor: pointer;
+      background: var(--card);
+      border: 2px solid var(--border);
+      border-radius: var(--paper-lg);
+      transition: transform .12s;
+    }
+
+    .choice:hover {
+      transform: translateY(-2px);
+    }
+
+    .choice:has(input:checked) {
+      border-color: var(--foreground);
+      background: var(--accent);
+      box-shadow: var(--sketch-hard);
+    }
+
+    .choice:has(input:disabled) {
+      cursor: not-allowed;
+      transform: none;
+    }
+
+    .choice:has(input:disabled:not(:checked)) {
+      opacity: .5;
+    }
+
+    .choice input {
+      position: absolute;
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    .choice:has(input:focus-visible) {
+      outline: 2px solid var(--ring);
+      outline-offset: 3px;
+    }
+
+    .choice-icon {
+      width: 40px;
+      height: 40px;
+      display: grid;
+      place-items: center;
+      flex: none;
+      border: 2px solid var(--foreground);
+      border-radius: var(--paper-sm);
+      background: var(--paper-highlight);
+    }
+
+    .choice-body {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .choice-title {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+      font: 700 16px/1.3 var(--font-display);
+    }
+
+    .choice-body p {
+      margin: 0;
+      font-size: 14px;
+      color: var(--muted-foreground);
+    }
+
+    .choice .check {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      display: none;
+      place-items: center;
+      background: var(--foreground);
+      color: var(--card);
+    }
+
+    .choice .check .i {
+      width: 14px;
+      height: 14px;
+      stroke-width: 3;
+    }
+
+    .choice:has(input:checked) .check {
+      display: grid;
+    }
+
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      font: 700 11px/16px var(--font-body);
+      padding: 2px 8px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: var(--muted);
+      color: var(--foreground);
+    }
+
+    /* Mono, so Plus Jakarta Sans does not turn the x of 0x10000 into a multiplication sign. */
+    .tag.addr {
+      font: 600 12px/16px var(--font-mono);
+    }
+
+    .tag.danger {
+      color: var(--destructive);
+      border-color: currentColor;
+      background: transparent;
+    }
+
+    .tag .i {
+      width: 13px;
+      height: 13px;
+    }
+
+    .source {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px 14px;
+      align-items: center;
+      justify-content: space-between;
+      margin-top: 16px;
+      padding: 12px 14px;
+      border: 1px dashed var(--input);
+      border-radius: var(--radius-lg);
+      background: var(--background);
+    }
+
+    .source p {
+      margin: 0;
+    }
+
+    .checklist {
+      list-style: none;
+      margin: 0 0 18px;
+      padding: 0;
+      display: grid;
+      gap: 8px;
+    }
+
+    .checklist li {
+      display: flex;
+      gap: 10px;
+      align-items: flex-start;
+      font-size: 14px;
+    }
+
+    .checklist .i {
+      color: var(--primary);
+      margin-top: 2px;
+    }
+
+    /* Companions */
+    /* Compact rows; past about three rows the list scrolls inside the card. */
+    .pets {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+      gap: 10px;
+      max-height: 372px;
+      overflow-y: auto;
+      overscroll-behavior: contain;
+      padding: 2px 6px 6px 2px;
+      margin-right: -6px;
+      scrollbar-gutter: stable;
+    }
+
+    .pet {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      padding: 10px;
+      background: var(--background);
+      border: 2px solid var(--foreground);
+      border-radius: var(--paper-lg);
+      box-shadow: var(--sketch-hard);
+    }
+
+    .pet canvas {
+      width: 72px;
+      height: 72px;
+      flex: none;
+      image-rendering: pixelated;
+      background: #000;
+      border-radius: 8px;
+      border: 2px solid var(--foreground);
+    }
+
+    .pet-body {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      min-width: 0;
+      flex: 1;
+    }
+
+    .pet-head {
+      display: flex;
+      gap: 6px;
+      align-items: center;
+    }
+
+    .pet .order {
+      flex: none;
+      width: 22px;
+      height: 22px;
+      display: grid;
+      place-items: center;
+      font: 800 11px/1 var(--font-display);
+      background: var(--paper-highlight);
+      border: 1.5px solid var(--foreground);
+      border-radius: 50%;
+    }
+
+    .pet input[type=text] {
+      flex: 1;
+      min-width: 0;
+      min-height: 32px;
+      padding: 4px 8px;
+    }
+
+    .pet .muted {
+      font-size: 12px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .pet .actions {
+      display: flex;
+      gap: 4px;
+    }
+
+    .pet .actions button {
+      min-height: 28px;
+      padding: 2px 9px;
+      box-shadow: none;
+    }
+
+    .gallery-tools {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 12px;
+    }
+
+    .gallery-tools input[type=search] {
+      flex: 1 1 180px;
+      max-width: 260px;
+    }
+
+    .chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+
+    .chips button {
+      border-radius: 999px;
+      min-height: 32px;
+      padding: 4px 12px;
+      font-size: 13px;
+      box-shadow: none;
+    }
+
+    .chips button[aria-pressed=true] {
+      background: var(--foreground);
+      color: var(--background);
+      border-color: var(--foreground);
+    }
+
+    .chips .count {
+      opacity: .65;
+      margin-left: 2px;
+      font-size: 12px;
+    }
+
+    .gallery {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+      gap: 8px;
+      max-height: 392px;
+      overflow-y: auto;
+      padding: 4px;
+      overscroll-behavior: contain;
+    }
+
+    .tile {
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 2px;
+      min-height: 0;
+      padding: 8px 4px 6px;
+      border-radius: var(--paper-lg);
+      background: var(--background);
+      border: 2px solid transparent;
+      box-shadow: none;
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .tile img {
+      width: 72px;
+      height: 72px;
+      display: block;
+    }
+
+    .tile:hover:not(:disabled) {
+      border-color: var(--border);
+      background: var(--background);
+    }
+
+    .tile[aria-pressed=true] {
+      border-color: var(--foreground);
+      background: var(--accent);
+      box-shadow: var(--sketch-hard);
+    }
+
+    .tile[aria-pressed=true]::after {
+      content: "✓";
+      position: absolute;
+      top: 5px;
+      right: 5px;
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      background: var(--gold);
+      color: #17201d;
+      border: 1.5px solid #17201d;
+      font-size: 11px;
+      font-weight: 800;
+      display: grid;
+      place-items: center;
+    }
+
+    .tile .badge {
+      position: absolute;
+      top: 5px;
+      left: 5px;
+      font-size: 10px;
+      font-weight: 700;
+      padding: 0 5px;
+      border-radius: 4px;
+      background: var(--muted);
+      color: var(--muted-foreground);
+    }
+
+    .tile:disabled {
+      opacity: .35;
+      cursor: not-allowed;
+    }
+
+    /* Already in the pack: dimmed and locked, with a clear "In pack" label. */
+    .tile.in-pack:disabled {
+      opacity: .5;
+      filter: grayscale(.6);
+    }
+
+    .tile.in-pack .badge {
+      background: var(--foreground);
+      color: var(--card);
+    }
+
+    .gallery-message {
+      padding: 24px 8px;
+      text-align: center;
+    }
+
+    .gallery-bar {
+      position: sticky;
+      bottom: 0;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
+      justify-content: space-between;
+      margin-top: 10px;
+      padding: 12px 0 2px;
+      background: var(--card);
+      border-top: 1px solid var(--border);
+    }
+
+    .tabs {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+      margin-bottom: 14px;
+      padding: 4px;
+      width: fit-content;
+      background: var(--muted);
+      border-radius: var(--radius-xl);
+    }
+
+    .tabs button {
+      border: 0;
+      box-shadow: none;
+      background: transparent;
+      min-height: 34px;
+      border-radius: var(--radius-lg);
+    }
+
+    .tabs button[aria-selected=true] {
+      background: var(--card);
+      box-shadow: 0 0 0 2px var(--foreground);
+    }
+
+    .panel[hidden] {
+      display: none;
+    }
+
+    .grid-2 {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+
+    .sheets {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 12px;
+      margin: 12px 0 14px;
+    }
+
+    .sheet {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      padding: 12px;
+      background: var(--background);
+      border: 1px solid var(--border);
+      border-radius: var(--paper-lg);
+    }
+
+    .sheet-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      font-size: 14px;
+    }
+
+    .sheet-head .muted {
+      font-size: 12px;
+    }
+
+    .pose-grid {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 4px;
+      counter-reset: none;
+    }
+
+    .pose-grid li {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      min-height: 30px;
+      padding: 4px 7px;
+      font-size: 12px;
+      font-weight: 600;
+      background: var(--card);
+      border: 1px dashed var(--input);
+      border-radius: var(--radius-md);
+    }
+
+    .pose-grid li b {
+      font: 700 10px/1 var(--font-mono);
+      color: var(--muted-foreground);
+    }
+
+    /* Progress, status and logs */
+    .meter {
+      height: 12px;
+      background: var(--muted);
+      border: 2px solid var(--foreground);
+      border-radius: 999px;
+      overflow: hidden;
+      margin: 10px 0;
+    }
+
+    .meter[hidden] {
+      display: none;
+    }
+
+    .meter>div {
+      height: 100%;
+      background: var(--primary);
+      width: 0;
+      transition: width .2s;
+    }
+
+    .status {
+      display: flex;
+      gap: 8px;
+      align-items: flex-start;
+      font-size: 14px;
+      font-weight: 600;
+      margin-top: 10px;
+      min-height: 1.5em;
+    }
+
+    .status:empty {
+      display: none;
+    }
+
+    .status.error {
+      color: var(--destructive);
+    }
+
+    .status.ok {
+      color: var(--ok);
+    }
+
+    .status.warn {
+      color: var(--warn);
+    }
+
+    /* Status is never colour alone: each tone also carries an icon. */
+    .status.error::before,
+    .status.ok::before,
+    .status.warn::before {
+      content: "";
+      flex: none;
+      width: 18px;
+      height: 18px;
+      margin-top: 1px;
+      background: currentColor;
+      -webkit-mask: var(--glyph) center / contain no-repeat;
+      mask: var(--glyph) center / contain no-repeat;
+    }
+
+    .status.ok {
+      --glyph: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='10'/%3E%3Cpath d='m9 12 2 2 4-4'/%3E%3C/svg%3E");
+    }
+
+    .status.error {
+      --glyph: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='10'/%3E%3Cpath d='m15 9-6 6'/%3E%3Cpath d='m9 9 6 6'/%3E%3C/svg%3E");
+    }
+
+    .status.warn {
+      --glyph: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3'/%3E%3Cpath d='M12 9v4'/%3E%3Cpath d='M12 17h.01'/%3E%3C/svg%3E");
+    }
+
+    pre.log {
+      font: 12px/1.5 var(--font-mono);
+      background: var(--background);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      padding: 10px 12px;
+      max-height: 220px;
+      overflow: auto;
+      white-space: pre-wrap;
+      margin: 12px 0 0;
+      color: var(--muted-foreground);
+    }
+
+    footer {
+      max-width: 960px;
+      margin: 0 auto;
+      padding: 0 16px 40px;
+      font-size: 13px;
+      color: var(--muted-foreground);
+    }
+
+    @media (max-width: 560px) {
+      h1 {
+        font-size: 26px;
+      }
+
+      .card {
+        padding: 16px;
+        box-shadow: 4px 4px 0 var(--secondary);
+      }
+
+      .views {
+        width: 100%;
+        order: 3;
+      }
+
+      .views [role=tab] {
+        flex: 1;
+        justify-content: center;
+      }
+
+      .gallery {
+        grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
+        max-height: 340px;
+      }
+
+      .tile img {
+        width: 60px;
+        height: 60px;
+      }
+
+      .gallery-tools input[type=search] {
+        max-width: none;
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      * {
+        transition: none !important;
+      }
+
+      button:hover,
+      .choice:hover,
+      .views [role=tab]:hover {
+        transform: none !important;
+      }
+    }
+  </style>
 </head>
+
 <body>
-<main>
-  <h1>DeskPet Customizer</h1>
-  <p class="lead">Choose the companions and the alarm ringtone, then flash them straight to the board from
-    the browser. Only the asset partition is written: Wi-Fi, the alarm and other settings are kept.</p>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <a class="brand" href="#customize" aria-label="DeskPet">
+        <span class="brand-tile"><svg class="i" viewBox="0 0 24 24" aria-hidden="true">
+            <path
+              d="M12 5c.67 0 1.35.09 2 .26 1.78-2 5.03-2.84 6.42-2.26 1.4.58-.42 7-.42 7 .57 1.07 1 2.24 1 3.44C21 17.9 16.97 21 12 21s-9-3-9-7.56c0-1.25.5-2.4 1-3.44 0 0-1.89-6.42-.5-7 1.39-.58 4.72.23 6.5 2.23A9.04 9.04 0 0 1 12 5Z" />
+            <path d="M8 14v.5" />
+            <path d="M16 14v.5" />
+            <path d="M11.25 16.25h1.5L12 17l-.75-.75Z" />
+          </svg></span>
+        <span class="wordmark">DeskPet<span>.</span></span>
+      </a>
+      <nav class="views" role="tablist" aria-label="Sections">
+        <button role="tab" id="firmware-tab" aria-selected="false" data-panel="view-firmware" data-hash="firmware">
+          <svg class="i" viewBox="0 0 24 24" aria-hidden="true">
+            <rect width="16" height="16" x="4" y="4" rx="2" />
+            <rect width="6" height="6" x="9" y="9" rx="1" />
+            <path d="M15 2v2" />
+            <path d="M15 20v2" />
+            <path d="M2 15h2" />
+            <path d="M2 9h2" />
+            <path d="M20 15h2" />
+            <path d="M20 9h2" />
+            <path d="M9 2v2" />
+            <path d="M9 20v2" />
+          </svg>
+          Firmware</button>
+        <button role="tab" id="customize-tab" aria-selected="true" data-panel="view-customize" data-hash="customize">
+          <svg class="i" viewBox="0 0 24 24" aria-hidden="true">
+            <circle cx="13.5" cy="6.5" r=".5" fill="currentColor" />
+            <circle cx="17.5" cy="10.5" r=".5" fill="currentColor" />
+            <circle cx="8.5" cy="7.5" r=".5" fill="currentColor" />
+            <circle cx="6.5" cy="12.5" r=".5" fill="currentColor" />
+            <path
+              d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.554C21.965 6.012 17.461 2 12 2z" />
+          </svg>
+          Customize</button>
+      </nav>
+      <button id="theme-toggle" class="theme-toggle" type="button" aria-pressed="false" aria-label="Dark mode"
+        title="Dark mode">
+        <svg class="i moon" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z" />
+        </svg>
+        <svg class="i sun" viewBox="0 0 24 24" aria-hidden="true">
+          <circle cx="12" cy="12" r="4" />
+          <path d="M12 2v2" />
+          <path d="M12 20v2" />
+          <path d="m4.93 4.93 1.41 1.41" />
+          <path d="m17.66 17.66 1.41 1.41" />
+          <path d="M2 12h2" />
+          <path d="M20 12h2" />
+          <path d="m6.34 17.66-1.41 1.41" />
+          <path d="m19.07 4.93-1.41 1.41" />
+        </svg>
+      </button>
+    </div>
+  </header>
 
-  <section>
-    <div class="row spread">
-      <h2>Asset pack</h2>
-      <div class="row">
-        <label class="button">Open pets.bin<input id="open-pack" type="file" accept=".bin" hidden></label>
-        <button id="reset-pack">Load the default</button>
+  <main>
+    <!-- ===================================================== Customize -->
+    <div id="view-customize" class="view" role="tabpanel" aria-labelledby="customize-tab">
+      <div class="intro">
+        <p class="eyebrow">Companions and ringtone</p>
+        <h1>Make the desk pet yours</h1>
+        <p class="lead">Pick the companions and the alarm ringtone, then flash them straight to the board. Only the
+          asset partition is written: Wi-Fi, alarms and other settings stay as they are.</p>
       </div>
-    </div>
-    <p id="pack-source" class="muted">Loading the default pack…</p>
-  </section>
 
-  <section>
-    <div class="row spread">
-      <h2>Companions</h2>
-      <span id="pet-count" class="muted"></span>
-    </div>
-    <p class="muted">The order here is the order in the picker on the board. Hover a picture to play it.</p>
-    <div id="pets" class="pets"></div>
-  </section>
-
-  <section>
-    <div class="row spread">
-      <h2>Add a companion</h2>
-      <span id="slots-left" class="muted"></span>
-    </div>
-    <div class="tabs" role="tablist">
-      <button id="gallery-tab" role="tab" aria-selected="true" data-panel="gallery-panel">Gallery</button>
-      <button role="tab" aria-selected="false" data-panel="posed-panel">Sprite sheets</button>
-      <button role="tab" aria-selected="false" data-panel="animated-panel">Animation</button>
-    </div>
-    <div id="gallery-panel" class="panel" data-test="mascot-gallery">
-      <div class="gallery-tools">
-        <div id="gallery-groups" class="chips" role="group" aria-label="Show"></div>
-        <input id="gallery-search" type="search" placeholder="Search characters" aria-label="Search characters">
-      </div>
-      <div id="gallery" class="gallery" aria-label="Characters"></div>
-      <p id="gallery-message" class="muted gallery-message" hidden></p>
-      <div class="gallery-bar">
-        <span id="gallery-picked" class="muted">Tap characters to pick them.</span>
-        <div class="row">
-          <button id="gallery-clear" disabled>Clear</button>
-          <button id="gallery-add" class="primary" disabled>Add</button>
+      <section class="card">
+        <div class="card-head">
+          <h2>Asset pack</h2>
+          <div class="row">
+            <label class="button">Open pets.bin<input id="open-pack" type="file" accept=".bin" hidden></label>
+            <button id="reset-pack">Load the default</button>
+          </div>
         </div>
-      </div>
-      <p class="muted note">Characters by Kamran Ahmed from
-        <a href="https://koboyo.com/page-mascot" target="_blank" rel="noopener">page-mascot</a>
-        (<a href="mascots/LICENSE" target="_blank">MIT license</a>). Each follows your finger on the board and
-        reacts to taps.</p>
-    </div>
-    <div id="posed-panel" class="panel" hidden>
-      <p>Two square sheets of 3×3 cells on a transparent background, like
-        <a href="../deskpet/assets/page-mascot/cat-directions.webp" target="_blank">cat-directions</a> and
-        <a href="../deskpet/assets/page-mascot/cat-reactions.webp" target="_blank">cat-reactions</a>.
-        Sheets downloaded from <a href="https://koboyo.com/page-mascot" target="_blank" rel="noopener">page-mascot</a>
-        work as they are. Cells, left to right and top to bottom:</p>
-      <ol id="pose-labels" class="labels"></ol>
-      <div class="grid-2">
-        <label class="field">Directions sheet (cells 1–9)<input id="directions-file" type="file" accept="image/*" multiple></label>
-        <label class="field">Reactions sheet (cells 10–18)<input id="reactions-file" type="file" accept="image/*" multiple></label>
-      </div>
-      <p class="muted">Choosing both files in either box works; the name is filled in from
-        <code>&lt;name&gt;-directions.webp</code>.</p>
-      <div class="row">
-        <input id="posed-name" type="text" maxlength="12" placeholder="Name">
-        <button id="add-posed" class="primary">Add companion</button>
-      </div>
-    </div>
-    <div id="animated-panel" class="panel" hidden>
-      <p>A GIF, animated WebP or APNG (a still PNG or JPEG works too). It is fitted into 64×64 pixels and
-        loops on the pet page; up to 2000 frames and 120 seconds.</p>
-      <div class="grid-2">
-        <label class="field">Image<input id="animated-file" type="file" accept="image/gif,image/webp,image/png,image/apng,image/jpeg"></label>
-      </div>
-      <div class="row">
-        <input id="animated-name" type="text" maxlength="12" placeholder="Name">
-        <button id="add-animated" class="primary">Add companion</button>
-      </div>
-    </div>
-    <p id="add-status" class="status"></p>
-  </section>
+        <p id="pack-source" class="muted">Loading the default pack…</p>
+      </section>
 
-  <section>
-    <h2>Alarm ringtone</h2>
-    <div class="row spread stack">
-      <p id="ringtone-state"></p>
-      <div class="row">
-        <button id="ringtone-play" disabled>Play</button>
-        <button id="ringtone-remove" disabled>Use the built-in ringtone</button>
-      </div>
-    </div>
-    <div class="row bottom">
-      <label class="button">Choose audio<input id="ringtone-file" type="file" accept="audio/*" hidden></label>
-      <label class="field">Start (s)<input id="ringtone-start" type="number" min="0" step="0.1" value="0" disabled></label>
-      <label class="field">End (s)<input id="ringtone-end" type="number" min="0" step="0.1" value="0" disabled></label>
-      <button id="ringtone-apply" disabled>Use this part</button>
-    </div>
-    <p class="muted note">Converted to 16 kHz mono, at most 30 seconds, and looped while the alarm rings.
-      A custom ringtone needs firmware 1.9.0 or newer.</p>
-    <p id="ringtone-status" class="status"></p>
-  </section>
+      <section class="card">
+        <div class="card-head">
+          <h2>Companions</h2>
+          <span id="pet-count" class="muted"></span>
+        </div>
+        <p class="muted">The order here is the order in the picker on the board. Hover a picture to play it.</p>
+        <div id="pets" class="pets"></div>
+      </section>
 
-  <section>
-    <h2>Save and flash</h2>
-    <div class="row spread"><span id="size-text" class="muted"></span><span id="version-text" class="muted"></span></div>
-    <div class="meter"><div id="size-bar"></div></div>
-    <p id="build-status" class="status"></p>
-    <div class="row">
-      <button id="flash" class="primary">Flash to DeskPet</button>
-      <button id="download">Download pets.bin</button>
+      <section class="card">
+        <div class="card-head">
+          <h2>Add a companion</h2>
+          <span id="slots-left" class="muted"></span>
+        </div>
+        <div class="tabs" role="tablist" aria-label="Ways to add a companion">
+          <button id="gallery-tab" role="tab" aria-selected="true" data-panel="gallery-panel">Gallery</button>
+          <button role="tab" aria-selected="false" data-panel="posed-panel">Sprite sheets</button>
+          <button role="tab" aria-selected="false" data-panel="animated-panel">Animation</button>
+        </div>
+        <div id="gallery-panel" class="panel" data-test="mascot-gallery">
+          <div class="gallery-tools">
+            <div id="gallery-groups" class="chips" role="group" aria-label="Show"></div>
+            <input id="gallery-search" type="search" placeholder="Search characters" aria-label="Search characters">
+          </div>
+          <div id="gallery" class="gallery" aria-label="Characters"></div>
+          <p id="gallery-message" class="muted gallery-message" hidden></p>
+          <div class="gallery-bar">
+            <span id="gallery-picked" class="muted">Tap characters to pick them.</span>
+            <div class="row">
+              <button id="gallery-clear" disabled>Clear</button>
+              <button id="gallery-add" class="primary" disabled>Add</button>
+            </div>
+          </div>
+          <p class="muted note">Characters by Kamran Ahmed from
+            <a href="https://koboyo.com/page-mascot" target="_blank" rel="noopener">page-mascot</a>
+            (<a href="mascots/LICENSE" target="_blank">MIT license</a>). Each follows your finger on the board and
+            reacts to taps.
+          </p>
+        </div>
+        <div id="posed-panel" class="panel" hidden>
+          <p class="muted">Two 3×3 sheets on a transparent background, read left to right, top to bottom. Sheets
+            from <a href="https://koboyo.com/page-mascot" target="_blank" rel="noopener">page-mascot</a> work as they
+            are (example: <a href="../deskpet/assets/page-mascot/cat-directions.webp" target="_blank">directions</a>,
+            <a href="../deskpet/assets/page-mascot/cat-reactions.webp" target="_blank">reactions</a>).</p>
+          <div class="sheets">
+            <label class="sheet">
+              <span class="sheet-head"><b>Directions</b><span class="muted">cells 1–9</span></span>
+              <ol id="pose-grid-directions" class="pose-grid" aria-hidden="true"></ol>
+              <input id="directions-file" type="file" accept="image/*" multiple>
+            </label>
+            <label class="sheet">
+              <span class="sheet-head"><b>Reactions</b><span class="muted">cells 10–18</span></span>
+              <ol id="pose-grid-reactions" class="pose-grid" aria-hidden="true"></ol>
+              <input id="reactions-file" type="file" accept="image/*" multiple>
+            </label>
+          </div>
+          <div class="row">
+            <input id="posed-name" type="text" maxlength="12" placeholder="Name">
+            <button id="add-posed" class="primary">Add companion</button>
+          </div>
+          <p class="muted note">Tip: pick both files at once; the name comes from
+            <code>&lt;name&gt;-directions.webp</code>.</p>
+        </div>
+        <div id="animated-panel" class="panel" hidden>
+          <p>A GIF, animated WebP or APNG (a still PNG or JPEG works too). It is fitted into 64×64 pixels and
+            loops on the pet page; up to 2000 frames and 120 seconds.</p>
+          <div class="grid-2">
+            <label class="field">Image<input id="animated-file" type="file"
+                accept="image/gif,image/webp,image/png,image/apng,image/jpeg"></label>
+          </div>
+          <div class="row">
+            <input id="animated-name" type="text" maxlength="12" placeholder="Name">
+            <button id="add-animated" class="primary">Add companion</button>
+          </div>
+        </div>
+        <p id="add-status" class="status"></p>
+      </section>
+
+      <section class="card">
+        <h2>Alarm ringtone</h2>
+        <div class="row spread stack" style="margin-top: 12px">
+          <p id="ringtone-state"></p>
+          <div class="row">
+            <button id="ringtone-play" disabled>Play</button>
+            <button id="ringtone-remove" disabled>Use the built-in ringtone</button>
+          </div>
+        </div>
+        <div class="row bottom">
+          <label class="button">Choose audio<input id="ringtone-file" type="file" accept="audio/*" hidden></label>
+          <label class="field">Start (s)<input id="ringtone-start" type="number" min="0" step="0.1" value="0"
+              disabled></label>
+          <label class="field">End (s)<input id="ringtone-end" type="number" min="0" step="0.1" value="0"
+              disabled></label>
+          <button id="ringtone-apply" disabled>Use this part</button>
+        </div>
+        <p class="muted note">Converted to 16 kHz mono, at most 30 seconds, and looped while the alarm rings.
+          A custom ringtone needs firmware 1.9.0 or newer.</p>
+        <p id="ringtone-status" class="status"></p>
+      </section>
+
+      <section class="card">
+        <h2>Save and flash</h2>
+        <div class="row spread" style="margin-top: 12px"><span id="size-text" class="muted"></span><span
+            id="version-text" class="muted"></span></div>
+        <div class="meter">
+          <div id="size-bar"></div>
+        </div>
+        <p id="build-status" class="status"></p>
+        <div class="row" style="margin-top: 14px">
+          <button id="flash" class="action">
+            <svg class="i" viewBox="0 0 24 24" aria-hidden="true">
+              <path
+                d="M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z" />
+            </svg>
+            Flash to DeskPet</button>
+          <button id="download">
+            <svg class="i" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+              <path d="m7 10 5 5 5-5" />
+              <path d="M12 15V3" />
+            </svg>
+            Download pets.bin</button>
+        </div>
+        <p class="muted note">Flashing needs Chrome or Edge on a computer, with the board plugged in over USB.
+          To flash the downloaded file yourself, write it at <code>0x610000</code>.</p>
+        <div id="flash-meter" class="meter" hidden>
+          <div id="flash-bar"></div>
+        </div>
+        <p id="flash-status" class="status"></p>
+        <pre id="flash-log" class="log" hidden></pre>
+      </section>
     </div>
-    <p class="muted note">Flashing needs Chrome or Edge on a computer, with the board plugged in over USB.
-      To flash the downloaded file yourself, write it at <code>0x610000</code>.</p>
-    <div id="flash-meter" class="meter" hidden><div id="flash-bar"></div></div>
-    <p id="flash-status" class="status"></p>
-    <pre id="flash-log" class="log" hidden></pre>
-  </section>
-</main>
-<script type="module" src="app.js" onerror="
+
+    <!-- ===================================================== Firmware -->
+    <div id="view-firmware" class="view" role="tabpanel" aria-labelledby="firmware-tab" hidden>
+      <div class="intro">
+        <p class="eyebrow">Install and update</p>
+        <h1>Flash the DeskPet firmware</h1>
+        <p class="lead">Install DeskPet on a new board or bring one up to date, straight from the browser. Nothing to
+          install: the page picks the right address and checks the board before and after.</p>
+      </div>
+
+      <section class="card">
+        <div class="card-head">
+          <h2><span class="step">1</span>Choose what to install</h2>
+        </div>
+        <div class="choices" role="radiogroup" aria-label="What to install">
+          <label class="choice">
+            <input type="radio" name="fw-kind" value="full" checked>
+            <span class="choice-icon"><svg class="i" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+                <path d="M3 3v5h5" />
+              </svg></span>
+            <span class="choice-body">
+              <span class="choice-title">Full install <span class="tag addr">0x0</span></span>
+              <p>Bootloader, partition table, firmware and the stock companions.</p>
+              <p><span class="tag danger"><svg class="i" viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3" />
+                    <path d="M12 9v4" />
+                    <path d="M12 17h.01" />
+                  </svg>Erases settings</span>
+                For a new board or a clean reset.</p>
+            </span>
+            <span class="check"><svg class="i" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M20 6 9 17l-5-5" />
+              </svg></span>
+          </label>
+          <label class="choice">
+            <input type="radio" name="fw-kind" value="app">
+            <span class="choice-icon"><svg class="i" viewBox="0 0 24 24" aria-hidden="true">
+                <circle cx="12" cy="12" r="10" />
+                <path d="m16 12-4-4-4 4" />
+                <path d="M12 16V8" />
+              </svg></span>
+            <span class="choice-body">
+              <span class="choice-title">Update <span class="tag addr">0x10000</span></span>
+              <p>Replaces only the firmware. Wi-Fi, settings and your companions are kept.</p>
+              <p>For a board that already runs DeskPet.</p>
+            </span>
+            <span class="check"><svg class="i" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M20 6 9 17l-5-5" />
+              </svg></span>
+          </label>
+
+        </div>
+        <div class="source">
+          <p id="fw-source" class="muted">Looking for the latest release…</p>
+          <div class="row">
+            <label class="button">
+              <svg class="i" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                <path d="m17 8-5-5-5 5" />
+                <path d="M12 3v12" />
+              </svg>
+              Use my own .bin<input id="fw-file" type="file" accept=".bin" hidden></label>
+            <button id="fw-release" hidden>Use the latest release</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="card-head">
+          <h2><span class="step">2</span>Flash it</h2>
+        </div>
+        <ul class="checklist">
+          <li><svg class="i" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M20 6 9 17l-5-5" />
+            </svg>
+            <span>Use Chrome or Edge on a computer.</span>
+          </li>
+          <li><svg class="i" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M20 6 9 17l-5-5" />
+            </svg>
+            <span>Plug the board in with a short USB cable, straight into the computer.</span>
+          </li>
+          <li><svg class="i" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M20 6 9 17l-5-5" />
+            </svg>
+            <span>Close the Arduino Serial Monitor and other tabs using the board, then pick
+              <b>USB JTAG/serial debug unit</b> when the browser asks.</span>
+          </li>
+        </ul>
+        <button id="fw-flash" class="action" disabled>
+          <svg class="i" viewBox="0 0 24 24" aria-hidden="true">
+            <path
+              d="M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z" />
+          </svg>
+          Flash firmware</button>
+        <div id="fw-meter" class="meter" hidden>
+          <div id="fw-bar"></div>
+        </div>
+        <p id="fw-status" class="status"></p>
+        <pre id="fw-log" class="log" hidden></pre>
+        <p class="muted note">If the board is not found, unplug it, hold <b>BOOT</b> while plugging it back in,
+          release it and try again. After a full install, hold BOOT for 2 seconds to set up Wi-Fi.</p>
+      </section>
+    </div>
+  </main>
+  <footer>DeskPet · <a href="https://github.com/Tunakite03/Esp32-DeskPet" target="_blank" rel="noopener">source and
+      releases on GitHub</a></footer>
+  <script type="module" src="app.js" onerror="
   document.getElementById('pack-source').innerHTML = 'The page script did not load, so nothing here works yet. ' +
     'Opened as a file, or served as text/plain by <code>python -m http.server</code> on Windows? ' +
     'Run <code>python web/serve.py</code> in the repository and open ' +
     '<a href=&quot;http://localhost:8000/web/&quot;>http://localhost:8000/web/</a>.';
   document.getElementById('pack-source').className = 'status error';"></script>
 </body>
+
 </html>

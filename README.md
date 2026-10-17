@@ -54,7 +54,11 @@ No toolchain needed. Download the files from the
 | `deskpet-vX.Y.Z-full.bin` | `0x0` | First install or a clean reset. It contains the bootloader, firmware and pets, and **resets saved settings** (Wi-Fi, pet name, alarm, brightness). |
 | `deskpet-vX.Y.Z-app.bin` | `0x10000` | Updating a board that already runs DeskPet. Settings and pets are kept. |
 
-There are two ways to flash them: in the browser (nothing to install) or with
+The easiest way is the **Firmware** section of the
+[customizer](https://tunakite03.github.io/Esp32-DeskPet/web/#firmware) (Chrome
+or Edge on a computer): it downloads the latest release, picks the right
+address for an update or a full install, and checks the board before and after.
+You can also flash the files yourself in the browser (nothing to install) or with
 esptool on the command line. After a first install, set up Wi-Fi as described in
 [Connect to Wi-Fi](#5-connect-to-wi-fi). The installed version is shown on the
 Settings page, next to the title.
@@ -245,6 +249,11 @@ Then open <http://localhost:8000/web/>. Use `web/serve.py` rather than
   partition table, writes the pack, restarts the board and reads
   `asset-status` back to confirm the companions (and ringtone) loaded.
   **Download pets.bin** saves the file to flash yourself at `0x610000`.
+- **Firmware**: installs the latest release (copied into the site by the
+  workflow) or a `.bin` you choose. *Update* writes the app at `0x10000` and
+  keeps settings and pets; *Full install* writes the full image at `0x0` and
+  erases settings. The page tells the two images apart, so a file is never
+  written at the wrong address, and reads the version back after the restart.
 
 A pack with a custom ringtone is format version 2, which firmware 1.9.0 and
 newer reads. Older firmware rejects it and shows no companions, so the page

@@ -3,8 +3,9 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import {
-  buildPack, checkAssetPartition, crc32, decodeFrame, encodeFrame, firmwareVersion, KIND_ANIMATION,
-  PackError, parsePack, parsePartitionTable, PARTITION_OFFSET, readsRingtone, toRingtonePcm,
+  APP_OFFSET, buildPack, checkAppPartition, checkAssetPartition, crc32, decodeFrame, encodeFrame, firmwareVersion,
+  inspectFirmware, KIND_ANIMATION, PackError, parsePack, parsePartitionTable, PARTITION_OFFSET, readsRingtone,
+  toRingtonePcm,
 } from "./pack.js";
 
 const SHIPPED = new Uint8Array(readFileSync(new URL("../deskpet/assets/pets.bin", import.meta.url)));
@@ -112,6 +113,48 @@ test("firmware versions gate the ringtone", () => {
   assert.equal(readsRingtone([1, 8, 2]), false);
   assert.equal(readsRingtone([1, 9, 0]), true);
   assert.equal(readsRingtone([2, 0, 0]), true);
+});
+
+test("firmware images are told apart and checked", () => {
+  /** An ESP32-S3 image header with a version string further in. */
+  const image = (bytes, at, version) => {
+    bytes[at] = 0xe9;
+    bytes[at + 12] = 9;
+    bytes[at + 13] = 0;
+    if (version) bytes.set(new TextEncoder().encode(`${version}\0`), at + 0x100);
+    return bytes;
+  };
+  const entry = (label, type, subtype, offset, size) => {
+    const bytes = new Uint8Array(32);
+    const view = new DataView(bytes.buffer);
+    bytes[0] = 0xaa; bytes[1] = 0x50; bytes[2] = type; bytes[3] = subtype;
+    view.setUint32(4, offset, true);
+    view.setUint32(8, size, true);
+    bytes.set(new TextEncoder().encode(label), 12);
+    return bytes;
+  };
+  const app = image(new Uint8Array(0x20000), 0, "DeskPet 1.9.0");
+  assert.deepEqual(inspectFirmware(app), { kind: "app", address: APP_OFFSET, version: "DeskPet 1.9.0" });
+  assert.equal(inspectFirmware(image(new Uint8Array(0x1000), 0, null)).version, null);
+
+  const full = image(new Uint8Array(PARTITION_OFFSET + 16).fill(0xff), 0, null);
+  full.set(entry("app0", 0, 0x10, APP_OFFSET, 0x300000), 0x8000);
+  full.set(entry("assets", 1, 0x40, PARTITION_OFFSET, 0x9e0000), 0x8020);
+  image(full, APP_OFFSET, "DeskPet 2.0.1");
+  assert.deepEqual(inspectFirmware(full), { kind: "full", address: 0, version: "DeskPet 2.0.1" });
+
+  assert.throws(() => inspectFirmware(new Uint8Array(0x1000)), PackError);
+  const esp32 = image(new Uint8Array(0x1000), 0, null);
+  esp32[12] = 0;
+  assert.throws(() => inspectFirmware(esp32), PackError);
+  const noApp = full.slice();
+  noApp[APP_OFFSET] = 0xff;
+  assert.throws(() => inspectFirmware(noApp), PackError);
+
+  const table = parsePartitionTable(full.subarray(0x8000, 0x8000 + 0xc00));
+  checkAppPartition(table, 0x200000);
+  assert.throws(() => checkAppPartition(table, 0x300001), PackError);
+  assert.throws(() => checkAppPartition(table.slice(1), 10), PackError);
 });
 
 test("ringtone PCM fades both ends", () => {

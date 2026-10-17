@@ -1,18 +1,25 @@
 // DeskPet Customizer: edits the companions and ringtone of an asset pack and
-// flashes it to the board's "assets" partition over Web Serial.
+// flashes it to the board's "assets" partition over Web Serial. It also
+// flashes release firmware (the app at 0x10000 or the full image at 0x0).
 import {
   ANIMATION_SIDE, buildPack, checkAssetPartition, decodeFrame, encodeFrame, firmwareVersion, KIND_ANIMATION,
   KIND_POSES, MAX_ANIMATION_FRAMES, MAX_ANIMATION_MS, MAX_PETS, MAX_RINGTONE_SAMPLES, MIN_PETS, nameProblem,
   PackError, parsePack, parsePartitionTable, PARTITION_OFFSET, PARTITION_SIZE, POSE_FRAME_FRONT, POSE_LABELS,
-  POSE_SIDE, readsRingtone, rgb565ToRgba, rgbaToRgb565, SAMPLE_RATE, toRingtonePcm,
+  POSE_SIDE, readsRingtone, rgb565ToRgba, rgbaToRgb565, SAMPLE_RATE, toRingtonePcm, checkAppPartition,
+  inspectFirmware,
 } from "./pack.js";
 
 /** @typedef {import("./pack.js").Pack} Pack */
 /** @typedef {import("./pack.js").PackPet} PackPet */
+/** @typedef {import("./pack.js").FirmwareImage} FirmwareImage */
 
 const DEFAULT_PACK_URL = "../deskpet/assets/pets.bin";
 const GALLERY_URL = "mascots/";  // written by fetch_mascots.py
-const ESPTOOL_URL = "https://unpkg.com/esptool-js@0.7.0/bundle.js";
+// Copied from the latest GitHub release by the Pages workflow: GitHub's own
+// download links cannot be fetched from a page (no CORS headers).
+const RELEASE_DIR = "firmware/";
+const RELEASES_PAGE = "https://github.com/Tunakite03/Esp32-DeskPet/releases/latest";
+const ESPTOOL_URL ="https://unpkg.com/esptool-js@0.7.0/bundle.js";
 const ESPRESSIF_VID = 0x303a;
 const FLASH_BAUD = 921600;
 const CONSOLE_BAUD = 115200;
@@ -28,6 +35,10 @@ let sourceAudio = null;
 /** @type {Uint8Array | null} */
 let builtPack = null;
 let flashing = false;
+/** @type {{ tag: string, url: string, app: string, full: string, sha256: Record<string, string> } | null} */
+let release = null;
+/** @type {{ name: string, bytes: Uint8Array, image: FirmwareImage } | null} a .bin the user chose */
+let chosenFirmware = null;
 
 /** @param {string} id @returns {any} */
 const $ = (id) => {
@@ -196,7 +207,19 @@ function renderPets() {
       refreshBuild();
     });
 
-    card.append(canvas, name, info, actions);
+    // Compact row: picture on the left; its place in the picker, the name,
+    // the kind and the buttons on the right.
+    const order = document.createElement("span");
+    order.className = "order";
+    order.textContent = String(index + 1);
+    order.title = `Place ${index + 1} in the picker`;
+    const head = document.createElement("div");
+    head.className = "pet-head";
+    head.append(order, name);
+    const body = document.createElement("div");
+    body.className = "pet-body";
+    body.append(head, info, actions);
+    card.append(canvas, body);
     list.append(card);
   });
   $("pet-count").textContent = `${pack.pets.length} of ${MAX_PETS} (at least ${MIN_PETS})`;
@@ -456,17 +479,24 @@ function refreshGallery() {
   if (mascots.length === 0) return;
   const query = nameKey($("gallery-search").value);
   const inPack = new Set(pack.pets.map((pet) => nameKey(pet.name)));
+  /** @param {Mascot} mascot */
+  const alreadyIn = (mascot) => inPack.has(nameKey(mascot.name));
+  // A character already in the pack cannot be picked again (also after a rename or an import).
+  picked = picked.filter((mascot) => !alreadyIn(mascot));
   const free = MAX_PETS - pack.pets.length;
   let shown = 0;
   for (const mascot of mascots) {
     const visible = (galleryGroup === "All" || mascot.group === galleryGroup) &&
       (!query || nameKey(mascot.name).includes(query) || mascot.id.includes(query));
     const isPicked = picked.includes(mascot);
+    const isIn = alreadyIn(mascot);
     mascot.tile.hidden = !visible;
     mascot.tile.setAttribute("aria-pressed", String(isPicked));
-    mascot.tile.disabled = adding || (!isPicked && picked.length >= free);
-    mascot.tile.title = isPicked ? `${mascot.name}: picked` : mascot.name;
-    mascot.badge.hidden = !inPack.has(nameKey(mascot.name));
+    mascot.tile.disabled = adding || isIn || (!isPicked && picked.length >= free);
+    mascot.tile.classList.toggle("in-pack", isIn);
+    mascot.tile.title = isIn ? `${mascot.name}: already in the pack`
+      : isPicked ? `${mascot.name}: picked` : mascot.name;
+    mascot.badge.hidden = !isIn;
     if (visible) ++shown;
   }
   for (const chip of /** @type {HTMLButtonElement[]} */ ([...$("gallery-groups").children])) {
@@ -622,6 +652,7 @@ function refreshBuild() {
   }
   $("download").disabled = !builtPack || flashing;
   $("flash").disabled = !builtPack || flashing || !("serial" in navigator);
+  $("fw-flash").disabled = flashing || !("serial" in navigator) || (!chosenFirmware && !release);
 }
 
 function download() {
@@ -634,13 +665,15 @@ function download() {
   setTimeout(() => URL.revokeObjectURL(link.href), 60000);
 }
 
-/** @param {string} line */
-function log(line) {
-  const element = $("flash-log");
+/** @param {string} id @returns {(line: string) => void} appends a line to that log box */
+const logTo = (id) => (line) => {
+  const element = $(id);
   element.hidden = false;
   element.textContent += `${line}\n`;
   element.scrollTop = element.scrollHeight;
-}
+};
+const log = logTo("flash-log");
+const firmwareLog = logTo("fw-log");
 
 /** @param {number} ms */
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -792,6 +825,175 @@ async function flash() {
 }
 
 // ---------------------------------------------------------------------------
+// Firmware
+
+/** @returns {"app" | "full"} */
+const firmwareKind = () => /** @type {HTMLInputElement} */ (
+  document.querySelector("input[name=fw-kind]:checked")).value === "full" ? "full" : "app";
+
+function renderFirmwareSource() {
+  const source = $("fw-source");
+  for (const radio of document.querySelectorAll("input[name=fw-kind]")) {
+    /** @type {HTMLInputElement} */ (radio).disabled = chosenFirmware !== null;
+  }
+  $("fw-release").hidden = !chosenFirmware || !release;
+  if (chosenFirmware) {
+    const { name, bytes, image } = chosenFirmware;
+    source.textContent = `${name}: ${image.kind === "full" ? "full image" : "update"}, ` +
+      `${image.version ?? "not DeskPet firmware"}, ${formatBytes(bytes.length)}`;
+  } else if (release) {
+    source.replaceChildren("Latest release: ", Object.assign(document.createElement("a"), {
+      href: release.url, target: "_blank", rel: "noopener", textContent: release.tag,
+    }), ` (${release[firmwareKind()]})`);
+  }
+  refreshBuild();
+}
+
+async function loadRelease() {
+  try {
+    const response = await fetch(`${RELEASE_DIR}latest.json`, { cache: "no-cache" });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    release = await response.json();
+  } catch {
+    release = null;
+    $("fw-source").replaceChildren("The latest release is only bundled with the online page. Download a .bin from ",
+      Object.assign(document.createElement("a"), { href: RELEASES_PAGE, target: "_blank", rel: "noopener",
+                                                    textContent: "the releases" }),
+      " and choose it here.");
+  }
+  renderFirmwareSource();
+}
+
+/** @param {File} file */
+async function chooseFirmware(file) {
+  try {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    chosenFirmware = { name: file.name, bytes, image: inspectFirmware(bytes) };
+    const radio = /** @type {HTMLInputElement} */ (
+      document.querySelector(`input[name=fw-kind][value=${chosenFirmware.image.kind}]`));
+    radio.checked = true;
+    setStatus("fw-status", "", "");
+  } catch (error) {
+    chosenFirmware = null;
+    setStatus("fw-status", `${file.name}: ${describe(error)}`, "error");
+  }
+  renderFirmwareSource();
+}
+
+/** @param {Uint8Array} bytes @returns {Promise<string>} */
+async function sha256(bytes) {
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
+  return [...digest].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+/** @returns {Promise<{ name: string, bytes: Uint8Array, image: FirmwareImage }>} */
+async function firmwareToFlash() {
+  if (chosenFirmware) return chosenFirmware;
+  if (!release) throw new PackError("Choose a .bin file first.");
+  const kind = firmwareKind();
+  const name = release[kind];
+  setStatus("fw-status", `Downloading ${name}…`, "");
+  const response = await fetch(RELEASE_DIR + name, { cache: "no-cache" });
+  if (!response.ok) throw new PackError(`${name} could not be downloaded (HTTP ${response.status}).`);
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  if (release.sha256?.[name] && await sha256(bytes) !== release.sha256[name]) {
+    throw new PackError(`${name} is damaged (its checksum does not match the release). Reload the page and retry.`);
+  }
+  const image = inspectFirmware(bytes);
+  if (image.kind !== kind) throw new PackError(`${name} is not the ${kind === "full" ? "full" : "update"} image.`);
+  return { name, bytes, image };
+}
+
+async function flashFirmware() {
+  flashing = true;
+  refreshBuild();
+  $("fw-log").textContent = "";
+  $("fw-bar").style.width = "0%";
+  $("fw-meter").hidden = true;
+  /** @type {any} */
+  let transport = null;
+  const cancelled = () => new PackError("Flashing cancelled");
+  try {
+    const port = await navigator.serial.requestPort({ filters: [{ usbVendorId: ESPRESSIF_VID }] });
+    const { name, bytes, image } = await firmwareToFlash();
+    firmwareLog(`${name}: ${image.version ?? "not DeskPet firmware"}, ${formatBytes(bytes.length)}, ` +
+                `written at 0x${image.address.toString(16)}`);
+    if (!image.version && !window.confirm(`${name} is not DeskPet firmware. Flash it anyway?`)) throw cancelled();
+    if (image.kind === "full" &&
+        !window.confirm("A full install erases the saved Wi-Fi, pet name, alarm and brightness, and puts the stock " +
+                        "companions back. Continue?")) {
+      throw cancelled();
+    }
+
+    setStatus("fw-status", "Asking the board for its firmware version…", "");
+    const status = await askFirmware(port, "status", "firmware", 6000);
+    firmwareLog(status ? `Board runs ${status.firmware}` : "The board did not report a firmware version");
+    // Firmware older than 1.9.0 cannot read a pack with a custom ringtone and shows no companions.
+    const target = image.version ? firmwareVersion(image.version) : null;
+    if (image.kind === "app" && status && target && !readsRingtone(target)) {
+      const assets = await askFirmware(port, "asset-status", "assets_ready", 6000);
+      if (Number(assets?.ringtone_samples) > 0 &&
+          !window.confirm(`The board's companions carry a custom ringtone, which ${image.version} cannot read: ` +
+                          "it would show no companions until you flash a pack without one. Continue?")) {
+        throw cancelled();
+      }
+    }
+
+    setStatus("fw-status", "Connecting to the bootloader…", "");
+    const { ESPLoader, Transport } = await import(ESPTOOL_URL);
+    transport = new Transport(port, false);
+    const terminal = { clean() {}, writeLine: firmwareLog, write: firmwareLog };
+    const loader = new ESPLoader({ transport, baudrate: FLASH_BAUD, terminal });
+    const chip = await loader.main();
+    if (!/ESP32-S3/.test(chip)) throw new PackError(`Expected an ESP32-S3, found ${chip}`);
+    if (image.kind === "app") {
+      // An update relies on the partition table already on the board.
+      const table = await loader.readFlash(PARTITION_TABLE_OFFSET, PARTITION_TABLE_SIZE);
+      checkAppPartition(parsePartitionTable(table), bytes.length);
+    }
+
+    setStatus("fw-status", image.kind === "full" ? "Writing the full image…" : "Writing the firmware…", "");
+    $("fw-meter").hidden = false;
+    await loader.writeFlash({
+      fileArray: [{ data: bytes, address: image.address }],
+      flashMode: "keep", flashFreq: "keep", flashSize: "keep", eraseAll: false, compress: true,
+      reportProgress: (/** @type {number} */ _file, /** @type {number} */ written, /** @type {number} */ total) => {
+        $("fw-bar").style.width = `${(written / total) * 100}%`;
+      },
+    });
+    await loader.after("hard_reset");
+    await transport.disconnect();
+    transport = null;
+
+    setStatus("fw-status", "Restarting the board…", "");
+    await sleep(2000);
+    const board = await findBoardPort();
+    const after = board ? await askFirmware(board, "status", "firmware", 15000) : null;
+    const wifiNote = image.kind === "full"
+      ? " Set up Wi-Fi again: hold BOOT for 2 seconds to open the setup portal." : "";
+    if (!after) {
+      setStatus("fw-status", `Flashed. The board did not answer afterwards; check that it starts.${wifiNote}`, "warn");
+    } else if (image.version && after.firmware !== image.version) {
+      setStatus("fw-status", `Flashed, but the board still reports ${after.firmware}. See the log above.`, "error");
+    } else {
+      setStatus("fw-status", `Done: the board runs ${after.firmware}.${wifiNote}`, "ok");
+    }
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "NotFoundError") {
+      setStatus("fw-status", "No board was chosen.", "warn");
+    } else {
+      setStatus("fw-status", describe(error), error instanceof PackError && error.message === "Flashing cancelled"
+        ? "warn" : "error");
+      firmwareLog(`Error: ${describe(error)}`);
+    }
+    if (transport) await transport.disconnect();
+  } finally {
+    flashing = false;
+    refreshBuild();
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Wiring
 
 /**
@@ -836,26 +1038,66 @@ function sortSheets(input) {
   setStatus("add-status", "", "");
 }
 
-function wireTabs() {
-  const tabs = /** @type {HTMLButtonElement[]} */ ([...document.querySelectorAll("[role=tab]")]);
-  for (const tab of tabs) {
-    tab.addEventListener("click", () => {
-      for (const other of tabs) {
-        const selected = other === tab;
-        other.setAttribute("aria-selected", String(selected));
-        $(/** @type {string} */ (other.dataset.panel)).hidden = !selected;
-      }
-    });
+/** @param {HTMLElement} tab shows its panel and hides the panels of the other tabs in its tablist */
+function selectTab(tab) {
+  const tabs = /** @type {NodeListOf<HTMLElement>} */ (tab.parentElement?.querySelectorAll("[role=tab]") ?? []);
+  for (const other of tabs) {
+    const selected = other === tab;
+    other.setAttribute("aria-selected", String(selected));
+    $(/** @type {string} */ (other.dataset.panel)).hidden = !selected;
   }
 }
 
+// Each tablist switches its own panels. The top tabs (Customize, Firmware)
+// also follow the URL hash, so #firmware links straight to the firmware page.
+function wireTabs() {
+  for (const tab of /** @type {NodeListOf<HTMLElement>} */ (document.querySelectorAll("[role=tab]"))) {
+    tab.addEventListener("click", () => {
+      selectTab(tab);
+      if (tab.dataset.hash) history.replaceState(null, "", `#${tab.dataset.hash}`);
+    });
+  }
+  const followHash = () => {
+    const tab = document.querySelector(`[role=tab][data-hash="${location.hash.slice(1)}"]`);
+    if (!(tab instanceof HTMLElement)) return;
+    selectTab(tab);
+  };
+  window.addEventListener("hashchange", followHash);
+  followHash();
+}
+
+/** Light is the default; the choice is kept per browser. */
+function wireThemeToggle() {
+  const toggle = $("theme-toggle");
+  // A toggle button: the label stays "Dark mode", aria-pressed says whether it is on.
+  const show = () => toggle.setAttribute("aria-pressed", String(document.documentElement.dataset.theme === "dark"));
+  toggle.addEventListener("click", () => {
+    const dark = document.documentElement.dataset.theme !== "dark";
+    if (dark) document.documentElement.dataset.theme = "dark";
+    else delete document.documentElement.dataset.theme;
+    try {
+      localStorage.setItem("deskpet-theme", dark ? "dark" : "light");
+    } catch {
+      // storage blocked: the choice lasts until the page is closed
+    }
+    show();
+  });
+  show();
+}
+
 function wire() {
-  $("pose-labels").replaceChildren(...POSE_LABELS.map((label) => {
+  // Each sheet's 3×3 cells, in the order the board reads them.
+  const cells = POSE_LABELS.map((label, index) => {
     const item = document.createElement("li");
-    item.textContent = label;
+    const number = document.createElement("b");
+    number.textContent = String(index + 1);
+    item.append(number, label);
     return item;
-  }));
+  });
+  $("pose-grid-directions").replaceChildren(...cells.slice(0, 9));
+  $("pose-grid-reactions").replaceChildren(...cells.slice(9));
   wireTabs();
+  wireThemeToggle();
   $("open-pack").addEventListener("change", async (/** @type {Event} */ event) => {
     const file = /** @type {HTMLInputElement} */ (event.target).files?.[0];
     if (!file) return;
@@ -908,9 +1150,25 @@ function wire() {
   });
   $("download").addEventListener("click", download);
   $("flash").addEventListener("click", flash);
+  $("fw-flash").addEventListener("click", flashFirmware);
+  $("fw-file").addEventListener("change", (/** @type {Event} */ event) => {
+    const input = /** @type {HTMLInputElement} */ (event.target);
+    const file = input.files?.[0];
+    input.value = "";  // so choosing the same file again still fires
+    if (file) chooseFirmware(file);
+  });
+  $("fw-release").addEventListener("click", () => {
+    chosenFirmware = null;
+    setStatus("fw-status", "", "");
+    renderFirmwareSource();
+  });
+  for (const radio of document.querySelectorAll("input[name=fw-kind]")) {
+    radio.addEventListener("change", renderFirmwareSource);
+  }
   if (!("serial" in navigator)) {
     setStatus("flash-status", "This browser cannot reach USB devices. Use Chrome or Edge, or download the file.",
               "warn");
+    setStatus("fw-status", "This browser cannot reach USB devices. Use Chrome or Edge.", "warn");
   }
   renderRingtone();
 }
@@ -918,3 +1176,4 @@ function wire() {
 wire();
 loadDefaultPack();
 loadGallery();
+loadRelease();

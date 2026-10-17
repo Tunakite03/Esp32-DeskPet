@@ -1,6 +1,7 @@
 # Tests the web customizer and publishes it to GitHub Pages.
-# Pull requests only run the tests; a push to master also deploys to
-# https://tunakite03.github.io/Esp32-DeskPet/web/
+# Pull requests only run the tests; a push to master or a published release
+# also deploys to https://tunakite03.github.io/Esp32-DeskPet/web/, with the
+# latest release's firmware for the page's Firmware section.
 name: Customizer
 
 on:
@@ -19,13 +20,16 @@ on:
       - "deskpet/assets/manifest.json"
       - "deskpet/assets/page-mascot/**"
       - ".github/workflows/customizer.yml"
+  release:
+    types: [published]
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: customizer-${{ github.ref }}
+  # Pushes and releases share one group so two deployments never overlap.
+  group: customizer-${{ github.event_name == 'pull_request' && github.ref || 'deploy' }}
   # Never cut a Pages deployment short; superseded PR runs can stop.
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
@@ -72,6 +76,25 @@ jobs:
           <a href="web/">DeskPet Customizer</a>
           HTML
           find _site -type f | sort
+      # GitHub's release download links send no CORS headers, so the page
+      # fetches the latest release's images from the site itself.
+      - name: Bundle the latest firmware release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p _site/web/firmware
+          cd _site/web/firmware
+          gh release download --repo "$GITHUB_REPOSITORY" --pattern 'deskpet-v*-app.bin' --pattern 'deskpet-v*-full.bin'
+          tag=$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName --jq .tagName)
+          app="deskpet-$tag-app.bin"
+          full="deskpet-$tag-full.bin"
+          test -s "$app"
+          test -s "$full"
+          jq -n --arg tag "$tag" --arg url "https://github.com/$GITHUB_REPOSITORY/releases/tag/$tag" \
+            --arg app "$app" --arg full "$full" \
+            --arg appSum "$(sha256sum "$app" | cut -d' ' -f1)" --arg fullSum "$(sha256sum "$full" | cut -d' ' -f1)" \
+            '{tag: $tag, url: $url, app: $app, full: $full, sha256: {($app): $appSum, ($full): $fullSum}}' > latest.json
+          cat latest.json
       - uses: actions/configure-pages@v6
       - uses: actions/upload-pages-artifact@v5
         with:

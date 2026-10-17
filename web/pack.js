@@ -518,3 +518,59 @@ export function readsRingtone(version) {
   const [major, minor] = version;
   return major > 1 || (major === 1 && minor >= 9);
 }
+
+// ---------------------------------------------------------------------------
+// Firmware images
+
+export const APP_OFFSET = 0x10000;
+export const FULL_IMAGE_OFFSET = 0x0;
+const IMAGE_MAGIC = 0xe9;
+const CHIP_ID_ESP32S3 = 9;
+const FULL_TABLE_OFFSET = 0x8000;
+const FULL_TABLE_SIZE = 0xc00;
+
+/**
+ * @typedef {{ kind: "app" | "full", address: number, version: string | null }} FirmwareImage
+ *   `version` is the "DeskPet x.y.z" string compiled into the firmware, or null
+ *   for a valid ESP32-S3 image that is not DeskPet.
+ */
+
+/**
+ * Tells a release's app image (flashed at 0x10000) from its full image
+ * (bootloader at 0x0, partition table at 0x8000, app at 0x10000, pets at
+ * 0x610000), so a file is never written at the wrong address.
+ * @param {Uint8Array} bytes
+ * @returns {FirmwareImage}
+ */
+export function inspectFirmware(bytes) {
+  /** @param {number} at */
+  const isS3Image = (at) => bytes.length >= at + 24 && bytes[at] === IMAGE_MAGIC &&
+    (bytes[at + 12] | (bytes[at + 13] << 8)) === CHIP_ID_ESP32S3;
+  if (!isS3Image(0)) throw new PackError("This is not an ESP32-S3 firmware image.");
+  const full = bytes.length > FULL_TABLE_OFFSET + 32 &&
+    bytes[FULL_TABLE_OFFSET] === 0xaa && bytes[FULL_TABLE_OFFSET + 1] === 0x50;
+  if (full) {
+    const table = parsePartitionTable(bytes.subarray(FULL_TABLE_OFFSET, FULL_TABLE_OFFSET + FULL_TABLE_SIZE));
+    const slot = table.find((entry) => entry.type === 0 && entry.offset === APP_OFFSET);
+    if (!slot || !isS3Image(APP_OFFSET)) throw new PackError("This full image has no firmware at 0x10000.");
+    checkAssetPartition(table, 0);
+  }
+  // The version is the null-terminated VERSION string from config.h.
+  const app = full ? bytes.subarray(APP_OFFSET, PARTITION_OFFSET) : bytes;
+  const match = /DeskPet \d+\.\d+\.\d+(?=\0)/.exec(new TextDecoder("latin1").decode(app));
+  return { kind: full ? "full" : "app", address: full ? FULL_IMAGE_OFFSET : APP_OFFSET,
+           version: match ? match[0] : null };
+}
+
+/**
+ * Confirms an app image fits the board's first app slot, which is where the
+ * bootloader starts DeskPet. A board without DeskPet's layout needs the full image.
+ * @param {PartitionEntry[]} entries
+ * @param {number} appBytes
+ */
+export function checkAppPartition(entries, appBytes) {
+  const app = entries.find((entry) => entry.type === 0 && entry.offset === APP_OFFSET);
+  if (!app) throw new PackError("The board has no firmware slot at 0x10000. Flash the full DeskPet image first.");
+  checkAssetPartition(entries, 0);
+  if (appBytes > app.size) throw new PackError(`The firmware (${appBytes} bytes) is larger than its slot`);
+}
