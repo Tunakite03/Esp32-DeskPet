@@ -22,7 +22,13 @@ void settingSlider(const Slider &slider, int percent, uint16_t accent) {
 
 void drawSettings(const AppState &state) {
   const DeviceSettings &device = state.device;
-  header("DEVICE SETTINGS");
+  const String title = "DEVICE SETTINGS";
+  header(title.c_str());
+  // Firmware version as an outlined badge in the free space of the header, after the title.
+  const String version = String("v") + VERSION_NUMBER;
+  const int versionX = 16 + textWidth(title, FONT_SMALL) + 14;
+  canvas.drawRoundRect(versionX - 6, 8, textWidth(version, FONT_SMALL) + 12, 20, 6, COLOR_OUTLINE);
+  uiText(versionX, 11, version, FONT_SMALL, COLOR_TEXT);
   uiText(18, 38, "Brightness", FONT_TITLE, COLOR_TEXT);
   uiRightAligned(41, String(brightnessPercent(device.brightness)) + "%", FONT_BODY);
   settingSlider(BRIGHTNESS_SLIDER, brightnessPercent(device.brightness), COLOR_PEACH);

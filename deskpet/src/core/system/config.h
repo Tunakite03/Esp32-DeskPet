@@ -1,7 +1,10 @@
 #pragma once
 #include <stdint.h>
 
-inline constexpr char VERSION[] = "DeskPet 1.8.0";
+// Bump only the number; the boot splash, settings page and serial status read it from here.
+#define DESKPET_VERSION_NUMBER "1.8.0"
+inline constexpr char VERSION_NUMBER[] = DESKPET_VERSION_NUMBER;
+inline constexpr char VERSION[] = "DeskPet " DESKPET_VERSION_NUMBER;
 inline constexpr char TIMEZONE[] = "ICT-7";
 
 constexpr int SCREEN_WIDTH = 320, SCREEN_HEIGHT = 240;
