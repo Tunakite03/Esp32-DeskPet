@@ -14,7 +14,8 @@ from PIL import Image
 ROOT = Path(__file__).resolve().parents[1]  # sketch root; this script lives in tools/
 SNAPSHOTS = ROOT / "qa" / "snapshots"
 Scalar = str | int | float | bool | None
-VERSION = re.search(r'VERSION\[\] = "([^"]+)"', (ROOT / "src/core/system/config.h").read_text()).group(1)
+VERSION = "DeskPet " + re.search(r'#define DESKPET_VERSION_NUMBER "([^"]+)"',
+                                 (ROOT / "src/core/system/config.h").read_text()).group(1)
 
 
 def main() -> None:
