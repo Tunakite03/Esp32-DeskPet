@@ -40,6 +40,53 @@ Esp32-DeskPet/
 └── firmware/    A prebuilt full-flash image (merged-binary.bin) in a zip
 ```
 
+## Quick flash (prebuilt firmware)
+
+No toolchain needed. Download the files from the
+[latest release](https://github.com/Tunakite03/Esp32-DeskPet/releases/latest):
+
+| File | Flash at | Use it for |
+|---|---|---|
+| `deskpet-vX.Y.Z-full.bin` | `0x0` | First install or a clean reset. It contains the bootloader, firmware and pets, and **resets saved settings** (Wi-Fi, pet name, alarm, brightness). |
+| `deskpet-vX.Y.Z-app.bin` | `0x10000` | Updating a board that already runs DeskPet. Settings and pets are kept. |
+
+**1. Install esptool** in a virtual environment (Python 3 required):
+
+```bash
+python3 -m venv .venv
+```
+
+```bash
+.venv/bin/pip install esptool
+```
+
+On Windows, use `py -m venv .venv` and `.venv\Scripts\pip install esptool`.
+
+**2. Find the port.** Plug the board in over USB. It shows up as
+`/dev/cu.usbmodemXXXX` on macOS (`ls /dev/cu.usbmodem*`), `/dev/ttyACMx` on
+Linux, or `COMx` on Windows (Device Manager → Ports).
+
+**3. Flash.** Replace the port and the version in the file name.
+
+First install:
+
+```bash
+.venv/bin/esptool --chip esp32s3 --port /dev/cu.usbmodem2101 write-flash 0x0 deskpet-v1.8.0-full.bin
+```
+
+Update:
+
+```bash
+.venv/bin/esptool --chip esp32s3 --port /dev/cu.usbmodem2101 write-flash 0x10000 deskpet-v1.8.0-app.bin
+```
+
+The board restarts by itself when flashing is done. If esptool cannot connect,
+unplug the board, hold BOOT while plugging the USB cable back in, release BOOT
+and run the command again.
+After a first install, set up Wi-Fi as described in
+[Connect to Wi-Fi](#5-connect-to-wi-fi). The installed version is shown on the
+Settings page, next to the title.
+
 ## Build and flash
 
 Run every command from the `deskpet/` folder. `arduino-cli.yaml` keeps the
