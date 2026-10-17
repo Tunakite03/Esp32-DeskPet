@@ -526,7 +526,8 @@ void appLoop() {
       now - state.lastInteraction > 15000) {
     openSetup();
   }
-  if (!connected && now - lastReconnect > 60000) { WiFi.reconnect(); lastReconnect = now; }
+  // The setup portal pauses reconnects so it can scan; closing it reconnects.
+  if (!connected && !state.setup.open && now - lastReconnect > 60000) { WiFi.reconnect(); lastReconnect = now; }
 
   WeatherState &weather = state.weather;
   const uint32_t weatherInterval = weather.valid ? WEATHER_INTERVAL : WEATHER_RETRY_INTERVAL;

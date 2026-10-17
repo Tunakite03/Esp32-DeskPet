@@ -6,6 +6,8 @@
 inline constexpr char VERSION_NUMBER[] = DESKPET_VERSION_NUMBER;
 inline constexpr char VERSION[] = "DeskPet " DESKPET_VERSION_NUMBER;
 inline constexpr char TIMEZONE[] = "ICT-7";
+// Setup access point password unless one was stored with `ap-password <value>`.
+inline constexpr char DEFAULT_AP_PASSWORD[] = "AAAA8888";
 
 constexpr int SCREEN_WIDTH = 320, SCREEN_HEIGHT = 240;
 

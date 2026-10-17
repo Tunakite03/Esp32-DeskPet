@@ -199,8 +199,9 @@ If the pack is missing or damaged, the firmware still boots and logs a
 On first boot the device offers the setup portal by itself if it has never
 connected to Wi-Fi. You can also open it at any time by holding BOOT for about
 2 seconds. The screen shows the access point name (`DeskPet-XXXX`) and its
-password. Join that network, open `http://192.168.4.1`, then choose your Wi-Fi
-and weather location.
+password, `AAAA8888` by default (change it with the serial command
+`ap-password <value>`). Join that network, open `http://192.168.4.1`, then
+choose your Wi-Fi and weather location.
 
 ## Customize companions and ringtone
 

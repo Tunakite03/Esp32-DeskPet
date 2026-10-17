@@ -44,11 +44,11 @@ struct ScannedNetwork {
   bool secure;
 };
 
+// A scan that cannot start (the station is busy connecting) reports -2 again,
+// so the next poll retries; the page gives up on its own after a while.
 void triggerWifiScan() {
-  if (WiFi.scanComplete() != -1) {
-    WiFi.scanDelete();
-    WiFi.scanNetworks(true);
-  }
+  if (WiFi.scanComplete() == WIFI_SCAN_RUNNING) return;
+  if (WiFi.scanNetworks(true) == WIFI_SCAN_FAILED) logError("setup", "Wi-Fi scan could not start");
 }
 
 std::vector<ScannedNetwork> getScannedNetworks() {
@@ -248,42 +248,47 @@ function updateOptions(networks){
     if(n.ssid===cur){opt.selected=true;matched=true;}
     sel.appendChild(opt);
   });
+  if(!networks.length){
+    const noneOpt=document.createElement('option');
+    noneOpt.value='';noneOpt.disabled=true;
+    noneOpt.textContent='No networks found - tap Scan to retry';
+    sel.appendChild(noneOpt);
+  }
   const manOpt=document.createElement('option');
   manOpt.value='__manual__';
   manOpt.textContent='✏️ Enter manually / Hidden network...';
   if(!matched&&cur){manOpt.selected=true;manBox.style.display='block';}
   sel.appendChild(manOpt);
 }
-function pollScan(){
-  fetch('/scan')
+function scanFinished(networks){
+  if(pollTimer)clearTimeout(pollTimer);
+  pollTimer=null;
+  updateOptions(networks);
+  scanBtn.disabled=false;
+  scanBtn.textContent='Scan';
+}
+// The radio leaves the setup channel while it scans, so a request may drop:
+// keep polling, but give up after about 25 s.
+let scanDeadline=0;
+function pollScan(url){
+  fetch(url||'/scan')
     .then(function(r){return r.json();})
     .then(function(d){
-      if(d.status==='done'&&d.networks){
-        updateOptions(d.networks);
-        scanBtn.disabled=false;
-        scanBtn.textContent='Scan';
-      }else{
-        pollTimer=setTimeout(pollScan,1200);
-      }
+      if(d.status==='done'&&d.networks&&!url){scanFinished(d.networks);return;}
+      if(Date.now()>scanDeadline){scanFinished([]);return;}
+      pollTimer=setTimeout(function(){pollScan();},1200);
     })
-    .catch(function(){scanBtn.disabled=false;scanBtn.textContent='Scan';});
+    .catch(function(){
+      if(Date.now()>scanDeadline){scanFinished([]);return;}
+      pollTimer=setTimeout(function(){pollScan();},1500);
+    });
 }
 function startScan(rescan){
   scanBtn.disabled=true;
   scanBtn.textContent='Scanning...';
   if(pollTimer)clearTimeout(pollTimer);
-  fetch(rescan?'/scan?rescan=1':'/scan')
-    .then(function(r){return r.json();})
-    .then(function(d){
-      if(d.status==='done'&&d.networks&&!rescan){
-        updateOptions(d.networks);
-        scanBtn.disabled=false;
-        scanBtn.textContent='Scan';
-      }else{
-        pollTimer=setTimeout(pollScan,1200);
-      }
-    })
-    .catch(function(){scanBtn.disabled=false;scanBtn.textContent='Scan';});
+  scanDeadline=Date.now()+25000;
+  pollScan(rescan?'/scan?rescan=1':'');
 }
 scanBtn.addEventListener('click',function(){startScan(true);});
 if(document.getElementById('scan_opt')){startScan(false);}
@@ -367,12 +372,15 @@ bool openSetupPortal() {
   snprintf(suffix, sizeof(suffix), "%04X", static_cast<unsigned>(ESP.getEfuseMac() & 0xFFFF));
   setup.apName = "DeskPet-" + String(suffix);
   setup.apPassword = loadApPassword();
-  if (setup.apPassword.isEmpty()) {
-    constexpr char alphabet[] = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-    for (int i = 0; i < 12; ++i) setup.apPassword += alphabet[esp_random() % (sizeof(alphabet) - 1)];
-  }
+  if (setup.apPassword.isEmpty()) setup.apPassword = DEFAULT_AP_PASSWORD;
   formToken = String(esp_random(), HEX) + String(esp_random(), HEX);
   WiFi.mode(WIFI_AP_STA);
+  // The radio refuses to scan while the station keeps retrying a network it cannot
+  // reach, so stop those retries while the portal is open; closing it resumes them.
+  WiFi.setAutoReconnect(false);
+  if (WiFi.status() != WL_CONNECTED) WiFi.disconnect(false, false);
+  // A full scan takes about 5 s; one the driver drops is reported failed after 15 s, not 60.
+  WiFi.setScanTimeout(15000);
   if (!WiFi.softAP(setup.apName.c_str(), setup.apPassword.c_str())) {
     logError("setup", "Access point start failed");
     return false;
@@ -389,6 +397,11 @@ void closeSetupPortal() {
   WiFi.scanDelete();
   WiFi.softAPdisconnect(true);
   WiFi.mode(WIFI_STA);
+  WiFi.setAutoReconnect(true);
+  if (WiFi.status() != WL_CONNECTED) {
+    if (currentNetwork->ssid.isEmpty()) WiFi.begin();
+    else WiFi.begin(currentNetwork->ssid.c_str(), currentNetwork->password.c_str());
+  }
   appState->setup.open = false;
   appState->setup.apPassword = "";
   formToken = "";
