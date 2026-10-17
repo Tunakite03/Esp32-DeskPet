@@ -1,21 +1,18 @@
 #include <Arduino.h>
-#include <ArduinoJson.h>
-#include <Preferences.h>
-#include <WebServer.h>
 #include <WiFi.h>
 #include <Wire.h>
-#include <algorithm>
 #include <esp_system.h>
 #include <esp_task_wdt.h>
-#include <sys/time.h>
 #include <time.h>
-#include <vector>
 #include "src/core/audio/audio.h"
 #include "src/core/system/config.h"
 #include "src/features/ui/layout.h"
 #include "src/core/system/log.h"
 #include "src/app/model.h"
+#include "src/app/serial_console.h"
+#include "src/app/settings_store.h"
 #include "src/features/pet/pet_assets.h"
+#include "src/features/setup/setup_portal.h"
 #include "src/app/state.h"
 #include "src/features/talk/talk.h"
 #include "src/core/system/timekeeping.h"
@@ -35,19 +32,15 @@ constexpr uint32_t LONG_PRESS = 650;
 constexpr int LONG_PRESS_SLOP = 15, TAP_SLOP = 25;
 
 AppState state;
-WebServer server(80);
-Preferences preferences;
+NetworkCredentials network;
 
-// Bookkeeping that only input handling and persistence need.
+// Bookkeeping that only input handling and the main loop need.
 uint32_t alarmStartedAt = 0, lastAlarmCheck = 0;
-bool deviceSettingsPending = false;
-uint32_t deviceSettingsChangedAt = 0;
 uint8_t petReactionIndex = 0, rapidPetTaps = 0;
 uint32_t lastPetTapAt = 0, lastFrame = 0, lastWeatherAttempt = 0;
-uint32_t lastSave = 0, buttonAt = 0, lastReconnect = 0;
+uint32_t buttonAt = 0, lastReconnect = 0;
 bool buttonHeld = false, buttonWasDown = false, everConnected = false;
-bool savePending = false, fatalError = false, setupOffered = false;
-String formToken, networkName, networkPassword, serialLine;
+bool fatalError = false, setupOffered = false;
 uint32_t pendingConnectAt = 0;
 // Set by any input so the next frame is drawn immediately instead of on the 50 ms tick.
 bool inputPending = false;
@@ -76,412 +69,34 @@ void requestWeather(uint32_t now) {
   }
 }
 
-String escapeHtml(const String &value) {
-  String result = value;
-  result.replace("&", "&amp;"); result.replace("<", "&lt;");
-  result.replace(">", "&gt;"); result.replace("\"", "&quot;"); result.replace("'", "&#39;");
-  return result;
-}
-
-bool parseUnsigned(const String &input, uint32_t minimum, uint32_t maximum, uint32_t &result) {
-  if (input.isEmpty() || input.length() > 10) return false;
-  uint64_t value = 0;
-  for (size_t i = 0; i < input.length(); ++i) {
-    if (input[i] < '0' || input[i] > '9') return false;
-    value = value * 10 + static_cast<uint8_t>(input[i] - '0');
-    if (value > maximum) return false;
-  }
-  if (value < minimum) return false;
-  result = static_cast<uint32_t>(value);
-  return true;
-}
-
-// ---------------------------------------------------------------------------
-// Setup portal (SoftAP + web form)
-
-struct ScannedNetwork {
-  String ssid;
-  int32_t rssi;
-  bool secure;
-};
-
-void triggerWifiScan() {
-  if (WiFi.scanComplete() != -1) {
-    WiFi.scanDelete();
-    WiFi.scanNetworks(true);
-  }
-}
-
-std::vector<ScannedNetwork> getScannedNetworks() {
-  std::vector<ScannedNetwork> list;
-  const int16_t count = WiFi.scanComplete();
-  if (count <= 0) return list;
-
-  list.reserve(count > 30 ? 30 : count);
-  for (int16_t i = 0; i < count; ++i) {
-    String ssid = WiFi.SSID(i);
-    ssid.trim();
-    if (ssid.isEmpty()) continue;
-
-    const int32_t rssi = WiFi.RSSI(i);
-    const bool secure = WiFi.encryptionType(i) != WIFI_AUTH_OPEN;
-
-    bool found = false;
-    for (auto &net : list) {
-      if (net.ssid == ssid) {
-        found = true;
-        if (rssi > net.rssi) {
-          net.rssi = rssi;
-          net.secure = secure;
-        }
-        break;
-      }
-    }
-    if (!found) {
-      list.push_back({ssid, rssi, secure});
-    }
-  }
-
-  std::sort(list.begin(), list.end(), [](const ScannedNetwork &a, const ScannedNetwork &b) {
-    return a.rssi > b.rssi;
-  });
-
-  if (list.size() > 30) list.resize(30);
-  return list;
-}
-
-bool setupClientAllowed() {
-  const IPAddress address = server.client().remoteIP();
-  return state.setup.open && address[0] == 192 && address[1] == 168 && address[2] == 4;
-}
-
-void handleScan() {
-  if (!setupClientAllowed()) {
-    server.send(403, "application/json", "{\"error\":\"forbidden\"}");
-    return;
-  }
-  if (server.hasArg("rescan")) {
-    triggerWifiScan();
-    server.sendHeader("Cache-Control", "no-store");
-    server.send(200, "application/json", "{\"status\":\"scanning\"}");
-    return;
-  }
-  const int16_t status = WiFi.scanComplete();
-  if (status == -1) {
-    server.sendHeader("Cache-Control", "no-store");
-    server.send(200, "application/json", "{\"status\":\"scanning\"}");
-    return;
-  }
-  if (status == -2) {
-    triggerWifiScan();
-    server.sendHeader("Cache-Control", "no-store");
-    server.send(200, "application/json", "{\"status\":\"scanning\"}");
-    return;
-  }
-  const std::vector<ScannedNetwork> networks = getScannedNetworks();
-  JsonDocument doc;
-  doc["status"] = "done";
-  JsonArray arr = doc["networks"].to<JsonArray>();
-  for (const auto &net : networks) {
-    JsonObject obj = arr.add<JsonObject>();
-    obj["ssid"] = net.ssid;
-    obj["rssi"] = net.rssi;
-    obj["secure"] = net.secure;
-  }
-  String response;
-  serializeJson(doc, response);
-  server.sendHeader("Cache-Control", "no-store");
-  server.send(200, "application/json", response);
-}
-
-void serveSetup() {
-  if (!setupClientAllowed()) {
-    server.send(403, "text/plain", "Connect to the setup Wi-Fi shown on the device.");
-    return;
-  }
-  const int16_t scanStatus = WiFi.scanComplete();
-  std::vector<ScannedNetwork> scanned;
-  if (scanStatus >= 0) {
-    scanned = getScannedNetworks();
-  } else if (scanStatus == -2) {
-    triggerWifiScan();
-  }
-
-  String html = R"HTML(<!doctype html><html lang="en"><head><meta charset="utf-8">)HTML"
-      R"HTML(<meta name="viewport" content="width=device-width,initial-scale=1"><title>DeskPet setup</title>)HTML"
-      R"HTML(<style>body{background:#101724;color:#e9f3ef;font:16px system-ui;margin:30px auto;padding:20px;max-width:440px})HTML"
-      R"HTML(h1{color:#7de2b7;margin:0 0 10px}label{display:block;margin:18px 0 7px})HTML"
-      R"HTML(input,select,button{box-sizing:border-box;width:100%;padding:13px;border:1px solid #405063;border-radius:10px;background:#1c293b;color:#fff;font-size:15px})HTML"
-      R"HTML(input:focus,select:focus{border-color:#7de2b7;outline:none})HTML"
-      R"HTML(button{background:#7de2b7;color:#101724;margin-top:24px;font-weight:700;cursor:pointer})HTML"
-      R"HTML(small{color:#a3b2be;display:block;margin-top:4px})HTML"
-      R"HTML(.wifi-hdr{display:flex;justify-content:space-between;align-items:center;margin:18px 0 7px})HTML"
-      R"HTML(.wifi-hdr label{margin:0})HTML"
-      R"HTML(.btn-scan{width:auto;margin:0;padding:6px 14px;font-size:13px;font-weight:600;background:#24354a;color:#7de2b7;border:1px solid #405063;border-radius:8px;cursor:pointer})HTML"
-      R"HTML(.btn-scan:disabled{opacity:0.6;cursor:wait})HTML"
-      R"HTML(#manual_box{margin-top:8px;display:none})HTML"
-      R"HTML(noscript #manual_box{display:block !important})HTML"
-      R"HTML(noscript #wifi_select_wrap{display:none !important}</style></head><body>)HTML"
-      R"HTML(<h1>Your little desk companion</h1>)HTML"
-      R"HTML(<p>Set up once. Clock and alarms work offline after the time is synced.</p>)HTML"
-      R"HTML(<form method="post" action="/save"><input type="hidden" name="token" value=")HTML";
-  html += formToken;
-  html += R"HTML("><div id="wifi_select_wrap"><div class="wifi-hdr">)HTML"
-          R"HTML(<label for="wifi_select">Wi-Fi network</label>)HTML"
-          R"HTML(<button type="button" class="btn-scan" id="scan_btn">Scan</button></div>)HTML";
-
-  const String defaultLabel = networkName.isEmpty() ? "-- Select a Wi-Fi network --"
-                                                    : "-- Keep current network (" + escapeHtml(networkName) + ") --";
-  html += "<select id=\"wifi_select\" data-default=\"" + defaultLabel + "\">";
-  html += "<option value=\"\">" + defaultLabel + "</option>";
-
-  if (!scanned.empty()) {
-    for (const auto &net : scanned) {
-      String label = "📶 " + escapeHtml(net.ssid);
-      if (net.secure) label += " 🔒";
-      label += " (" + String(net.rssi) + " dBm)";
-      html += "<option value=\"" + escapeHtml(net.ssid) + "\" data-secure=\"" + (net.secure ? "1" : "0") + "\">" +
-              label + "</option>";
-    }
-  } else {
-    html += R"HTML(<option value="" disabled id="scan_opt">Scanning nearby networks...</option>)HTML";
-  }
-  html += R"HTML(<option value="__manual__">&#9998; Enter manually / Hidden network...</option></select></div>)HTML";
-
-  html += R"HTML(<div id="manual_box"><label for="ssid">Wi-Fi name</label>)HTML"
-          R"HTML(<input name="ssid" id="ssid" maxlength="32" autocomplete="off" placeholder=")HTML";
-  html += networkName.isEmpty() ? "Enter Wi-Fi name" : "Leave blank to keep current network";
-  html += R"HTML("></div>)HTML";
-
-  html += R"HTML(<label for="password">Wi-Fi password</label>)HTML"
-          R"HTML(<input name="password" id="password" type="password" maxlength="63" autocomplete="new-password" )HTML"
-          R"HTML(placeholder="Not shown or logged">)HTML"
-          R"HTML(<label for="pet">Pet name</label><input name="pet" id="pet" maxlength="12" required value=")HTML";
-  html += escapeHtml(state.pet.name);
-  html += R"HTML("><small>Use English letters, numbers or spaces.</small>)HTML"
-          R"HTML(<label for="place">Weather location</label><select name="place" id="place">)HTML";
-  for (uint8_t i = 0; i < PLACE_COUNT; ++i) {
-    html += "<option value=" + String(i) + (state.weather.place == i ? " selected>" : ">") + PLACES[i].name +
-            "</option>";
-  }
-  html += R"HTML(</select><label for="brightness">Brightness</label><input type="range" name="brightness" id="brightness" min="3" max="255" value=)HTML";
-  html += String(state.device.brightness);
-  html += R"HTML(><input type="hidden" name="epoch" id="epoch"><button type="submit">Save and sync phone time</button></form>)HTML"
-          R"HTML(<p><small>Weather: Open-Meteo.com. Time zone: Vietnam (UTC+7). No account required.</small></p>)HTML";
-
-  html += R"HTML(<script>
-const sel=document.getElementById('wifi_select');
-const ssidInp=document.getElementById('ssid');
-const manBox=document.getElementById('manual_box');
-const passInp=document.getElementById('password');
-const scanBtn=document.getElementById('scan_btn');
-let pollTimer=null;
-sel.addEventListener('change',function(){
-  if(this.value==='__manual__'){
-    ssidInp.value='';manBox.style.display='block';ssidInp.focus();
-  }else if(this.value===''){
-    ssidInp.value='';manBox.style.display='none';
-  }else{
-    ssidInp.value=this.value;manBox.style.display='none';
-    const opt=this.options[this.selectedIndex];
-    if(opt&&opt.getAttribute('data-secure')==='0'){
-      passInp.placeholder='Open network (no password)';
-    }else{
-      passInp.placeholder='Not shown or logged';
-    }
-    passInp.focus();
-  }
-});
-function updateOptions(networks){
-  const cur=ssidInp.value;
-  sel.innerHTML='';
-  const defOpt=document.createElement('option');
-  defOpt.value='';
-  defOpt.textContent=sel.getAttribute('data-default');
-  sel.appendChild(defOpt);
-  let matched=false;
-  networks.forEach(function(n){
-    const opt=document.createElement('option');
-    opt.value=n.ssid;
-    opt.setAttribute('data-secure',n.secure?'1':'0');
-    opt.textContent='📶 '+n.ssid+(n.secure?' 🔒':'')+' ('+n.rssi+' dBm)';
-    if(n.ssid===cur){opt.selected=true;matched=true;}
-    sel.appendChild(opt);
-  });
-  const manOpt=document.createElement('option');
-  manOpt.value='__manual__';
-  manOpt.textContent='✏️ Enter manually / Hidden network...';
-  if(!matched&&cur){manOpt.selected=true;manBox.style.display='block';}
-  sel.appendChild(manOpt);
-}
-function pollScan(){
-  fetch('/scan')
-    .then(function(r){return r.json();})
-    .then(function(d){
-      if(d.status==='done'&&d.networks){
-        updateOptions(d.networks);
-        scanBtn.disabled=false;
-        scanBtn.textContent='Scan';
-      }else{
-        pollTimer=setTimeout(pollScan,1200);
-      }
-    })
-    .catch(function(){scanBtn.disabled=false;scanBtn.textContent='Scan';});
-}
-function startScan(rescan){
-  scanBtn.disabled=true;
-  scanBtn.textContent='Scanning...';
-  if(pollTimer)clearTimeout(pollTimer);
-  fetch(rescan?'/scan?rescan=1':'/scan')
-    .then(function(r){return r.json();})
-    .then(function(d){
-      if(d.status==='done'&&d.networks&&!rescan){
-        updateOptions(d.networks);
-        scanBtn.disabled=false;
-        scanBtn.textContent='Scan';
-      }else{
-        pollTimer=setTimeout(pollScan,1200);
-      }
-    })
-    .catch(function(){scanBtn.disabled=false;scanBtn.textContent='Scan';});
-}
-scanBtn.addEventListener('click',function(){startScan(true);});
-if(document.getElementById('scan_opt')){startScan(false);}
-document.querySelector('form').addEventListener('submit',function(){
-  document.getElementById('epoch').value=Math.floor(Date.now()/1000);
-});
-</script></body></html>)HTML";
-
-  server.sendHeader("Cache-Control", "no-store");
-  server.send(200, "text/html", html);
-}
-
-bool validPetName(const String &name) {
-  if (name.length() < 1 || name.length() > 12) return false;
-  for (size_t i = 0; i < name.length(); ++i) {
-    if (!isalnum(static_cast<unsigned char>(name[i])) && name[i] != ' ') return false;
-  }
-  return true;
-}
-
-void saveSetup() {
-  if (!setupClientAllowed() || !server.hasArg("token") || server.arg("token") != formToken) {
-    server.send(403, "text/plain", "Invalid setup session.");
-    return;
-  }
-  uint32_t newPlace = 0, newBrightness = 0, epoch = 0;
-  const String name = server.arg("pet");
-  const String ssid = server.arg("ssid");
-  const String password = server.arg("password");
-  const bool passwordValid = password.isEmpty() || (password.length() >= 8 && password.length() <= 63);
-  if (!validPetName(name) || !parseUnsigned(server.arg("place"), 0, PLACE_COUNT - 1, newPlace) ||
-      !parseUnsigned(server.arg("brightness"), 3, 255, newBrightness) ||
-      !parseUnsigned(server.arg("epoch"), CLOCK_VALID_AFTER, 4102444799UL, epoch) ||
-      ssid.length() > 32 || !passwordValid) {
-    server.send(400, "text/plain",
-                "Invalid settings. Check pet name, location, brightness, phone time and Wi-Fi password length.");
-    return;
-  }
-  if (preferences.putString("pet", name) == 0 || preferences.putUChar("place", newPlace) == 0 ||
-      preferences.putUChar("bright", newBrightness) == 0) {
-    logError("settings", "NVS write failed");
-    server.send(500, "text/plain", "Settings could not be saved.");
-    return;
-  }
-  if (!ssid.isEmpty()) {
-    if (preferences.putString("ssid", ssid) == 0 ||
-        (!password.isEmpty() && preferences.putString("password", password) == 0)) {
-      logError("wifi", "NVS write failed");
-      server.send(500, "text/plain", "Network settings could not be saved.");
-      return;
-    }
-    if (password.isEmpty()) preferences.remove("password");
-    networkName = ssid; networkPassword = password;
+// Applies a form the setup portal has already saved to flash.
+void applySetupForm(const SetupForm &form) {
+  if (!form.ssid.isEmpty()) {
+    network = {form.ssid, form.password};
     pendingConnectAt = millis() + 1000;
   }
-  WiFi.scanDelete();
-  state.pet.name = name;
-  state.weather.place = newPlace;
-  state.device.brightness = newBrightness;
+  state.pet.name = form.petName;
+  state.weather.place = form.place;
+  state.device.brightness = form.brightness;
   ++state.uiRevision;
   state.weather.valid = false;
   lastWeatherAttempt = 0;
-  const timeval tv{static_cast<time_t>(epoch), 0};
-  settimeofday(&tv, nullptr);
-  server.send(200, "text/html",
-              "<meta name=viewport content='width=device-width,initial-scale=1'><h1>Saved!</h1>"
-              "<p>Phone time synchronized. Check the device for Wi-Fi connection status, then tap DONE. "
-              "You can now reconnect your phone to your usual Wi-Fi.</p>");
-  Serial.println("{\"event\":\"settings_saved\"}");
 }
 
-void openConfig() {
-  if (state.setup.open) return;
-  char suffix[9];
-  snprintf(suffix, sizeof(suffix), "%04X", static_cast<unsigned>(ESP.getEfuseMac() & 0xFFFF));
-  state.setup.apName = "DeskPet-" + String(suffix);
-  state.setup.apPassword = preferences.getString("ap_password", "");
-  if (state.setup.apPassword.isEmpty()) {
-    constexpr char alphabet[] = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-    for (int i = 0; i < 12; ++i) state.setup.apPassword += alphabet[esp_random() % (sizeof(alphabet) - 1)];
-  }
-  formToken = String(esp_random(), HEX) + String(esp_random(), HEX);
-  WiFi.mode(WIFI_AP_STA);
-  if (!WiFi.softAP(state.setup.apName.c_str(), state.setup.apPassword.c_str())) {
-    logError("setup", "Access point start failed");
-    return;
-  }
-  state.setup.open = true;
-  setupOffered = true;
-  triggerWifiScan();
-  server.begin();
-  Serial.println("{\"event\":\"setup_open\",\"url\":\"http://192.168.4.1\"}");
-}
-
-void closeConfig() {
-  server.stop();
-  WiFi.scanDelete();
-  WiFi.softAPdisconnect(true);
-  WiFi.mode(WIFI_STA);
-  state.setup.open = false;
-  state.setup.apPassword = "";
-  formToken = "";
-  state.page = PAGE_PET;
-  state.lastInteraction = millis();
+// The portal offers itself once after boot; opening it any other way counts as that offer.
+void openSetup() {
+  if (openSetupPortal()) setupOffered = true;
 }
 
 // ---------------------------------------------------------------------------
 // Device settings and alarm
 
 void markDeviceSettingsChanged(uint32_t now) {
-  deviceSettingsPending = true;
-  deviceSettingsChangedAt = now;
+  scheduleDeviceSettingsSave(now);
   state.lastInteraction = now;
   ++state.uiRevision;
   setAudioGain(state.device.muted ? 0 : state.device.volume);
   setBacklight(state.device.brightness);
-}
-
-// Writes are debounced so dragging a slider does not wear the flash.
-void saveDeviceSettings(uint32_t now) {
-  if (!deviceSettingsPending || now - deviceSettingsChangedAt < 600) return;
-  const DeviceSettings &device = state.device;
-  const AlarmSchedule &alarm = state.alarm;
-  const bool saved = preferences.putUChar("bright", device.brightness) != 0 &&
-                     preferences.putUChar("volume", device.volume) != 0 &&
-                     preferences.putBool("muted", device.muted) != 0 &&
-                     preferences.putBool("talk", device.talk) != 0 &&
-                     preferences.putUChar("alarm_hour", alarm.hour) != 0 &&
-                     preferences.putUChar("alarm_min", alarm.minute) != 0 &&
-                     preferences.putBool("alarm_on", alarm.enabled) != 0 &&
-                     preferences.putUInt("alarm_day", alarm.lastFiredDay) != 0;
-  if (!saved) {
-    logError("settings", "Device or alarm settings could not be saved");
-    deviceSettingsChangedAt = now;
-    return;
-  }
-  deviceSettingsPending = false;
-  Serial.println("{\"event\":\"device_settings_saved\"}");
 }
 
 void handleSettingsTap(int x, int y, uint32_t now) {
@@ -506,19 +121,6 @@ void handleSettingsTap(int x, int y, uint32_t now) {
   }
 }
 
-void printSettingsStatus() {
-  const DeviceSettings &device = state.device;
-  const AudioStats audio = audioStats();
-  Serial.printf("{\"brightness\":%u,\"brightness_percent\":%d,\"backlight_pwm\":%lu,\"volume\":%u,"
-                "\"muted\":%s,\"audio_ready\":%s,\"audio_completed\":%lu,\"audio_peak\":%lu,"
-                "\"settings_pending\":%s,\"talk\":%s,\"mic_ready\":%s}\n",
-                device.brightness, brightnessPercent(device.brightness),
-                static_cast<unsigned long>(backlightLevel()), device.volume, device.muted ? "true" : "false",
-                audioIsReady() ? "true" : "false", static_cast<unsigned long>(audio.completed),
-                static_cast<unsigned long>(audio.peak), deviceSettingsPending ? "true" : "false",
-                device.talk ? "true" : "false", micReady() ? "true" : "false");
-}
-
 void startAlarm(uint32_t now) {
   state.alarmRinging = true;
   alarmStartedAt = now;
@@ -537,7 +139,7 @@ void stopAlarm(uint32_t now) {
 
 void updateAlarm(uint32_t now) {
   if (state.alarmRinging && !alarmWithinRingWindow(alarmStartedAt, now)) stopAlarm(now);
-  if (now - lastAlarmCheck < 250 || !clockReady() || deviceSettingsPending) return;
+  if (now - lastAlarmCheck < 250 || !clockReady() || deviceSettingsPending()) return;
   lastAlarmCheck = now;
   const time_t epoch = time(nullptr);
   tm local{};
@@ -545,7 +147,7 @@ void updateAlarm(uint32_t now) {
   const uint32_t day = (local.tm_year + 1900) * 10000UL + (local.tm_mon + 1) * 100UL + local.tm_mday;
   if (!alarmDue(state.alarm, day, local.tm_hour, local.tm_min)) return;
   state.alarm.lastFiredDay = day;
-  if (preferences.putUInt("alarm_day", day) == 0) {
+  if (!saveAlarmFiredDay(day)) {
     logError("alarm", "Unable to persist fired date; a restart may repeat this alarm");
   }
   startAlarm(now);
@@ -563,15 +165,6 @@ void updateTalk(uint32_t now) {
   if (phase == TalkPhase::Hearing || phase == TalkPhase::Talking) state.lastInteraction = now;
 }
 
-void printAlarmStatus() {
-  const AlarmSchedule &alarm = state.alarm;
-  Serial.printf("{\"alarm_hour\":%u,\"alarm_minute\":%u,\"enabled\":%s,\"ringing\":%s,\"last_fired_day\":%lu,"
-                "\"clock_synced\":%s,\"local_time\":\"%s\"}\n",
-                alarm.hour, alarm.minute, alarm.enabled ? "true" : "false", state.alarmRinging ? "true" : "false",
-                static_cast<unsigned long>(alarm.lastFiredDay), clockReady() ? "true" : "false",
-                dateText("%Y-%m-%d %H:%M:%S").c_str());
-}
-
 // ---------------------------------------------------------------------------
 // Touch, button and pet interaction
 
@@ -586,7 +179,7 @@ void handlePetHold(int x, int y, uint32_t now) {
 
 void selectCompanion(uint8_t choice, uint32_t now) {
   PetState &pet = state.pet;
-  if (choice != pet.mascot && preferences.putUChar("mascot", choice) == 0) {
+  if (choice != pet.mascot && !saveCompanion(choice)) {
     logError("settings", "Companion selection could not be saved");
     return;
   }
@@ -639,7 +232,7 @@ void handlePetTap(uint32_t now) {
   pet.reacting = true;
   pet.reactedAt = now;
   ++pet.tapCount;
-  savePending = true;
+  scheduleTapCountSave();
 }
 
 void handleClockTap(int x, int y, uint32_t now) {
@@ -659,7 +252,7 @@ void handleClockTap(int x, int y, uint32_t now) {
 void handleTap(int x, int y, uint32_t now) {
   state.lastInteraction = now;
   if (state.alarmRinging) { if (hit(STOP_ALARM_BUTTON, x, y)) stopAlarm(now); return; }
-  if (state.setup.open) { if (hit(SETUP_DONE_BUTTON, x, y)) closeConfig(); return; }
+  if (state.setup.open) { if (hit(SETUP_DONE_BUTTON, x, y)) closeSetupPortal(); return; }
   if (NAV_BAR.contains(x, y)) {
     state.page = min(PAGE_COUNT - 1, x / NAV_TAB_WIDTH);
     state.pet.pickerOpen = false;
@@ -751,11 +344,11 @@ void pollButton(uint32_t now) {
   }
   if (pressed && now - buttonAt >= 1800 && !buttonHeld) {
     buttonHeld = true;
-    if (state.setup.open) closeConfig(); else openConfig();
+    if (state.setup.open) closeSetupPortal(); else openSetup();
   }
   if (!pressed && buttonWasDown && !buttonHeld && now - buttonAt > 30) {
     if (state.setup.open) {
-      closeConfig();
+      closeSetupPortal();
     } else {
       state.page = (state.page + 1) % PAGE_COUNT;
       state.pet.pickerOpen = false;
@@ -767,156 +360,76 @@ void pollButton(uint32_t now) {
 }
 
 // ---------------------------------------------------------------------------
-// Serial console (used by the QA scripts)
+// Serial console commands (read and parsed in serial_console.cpp)
 
-void printStatus() {
-  Serial.printf("{\"firmware\":\"%s\",\"board\":\"ES3C28P\",\"uptime_ms\":%lu,\"heap\":%u,\"psram\":%u,"
-                "\"page\":%u,\"wifi\":%s,\"clock_synced\":%s,\"weather_valid\":%s,\"weather_error\":%u,"
-                "\"alarm_ringing\":%s,\"touch_errors\":%u}\n",
-                VERSION, static_cast<unsigned long>(millis()), ESP.getFreeHeap(), ESP.getPsramSize(), state.page,
-                WiFi.status() == WL_CONNECTED ? "true" : "false", clockReady() ? "true" : "false",
-                state.weather.valid ? "true" : "false", static_cast<unsigned>(state.weather.current.error),
-                state.alarmRinging ? "true" : "false", state.touch.failures);
+void printPerf() {
+  Serial.printf("{\"perf\":true,\"loops\":%lu,\"renders\":%lu,\"avg_render_us\":%lu,\"max_render_us\":%lu,"
+                "\"max_loop_us\":%lu,\"max_pump_us\":%lu,\"max_save_us\":%lu,\"max_input_latency_ms\":%lu,\"free_heap\":%u}\n",
+                static_cast<unsigned long>(perf.loops), static_cast<unsigned long>(perf.renders),
+                static_cast<unsigned long>(perf.renders ? perf.totalRenderUs / perf.renders : 0),
+                static_cast<unsigned long>(perf.maxRenderUs), static_cast<unsigned long>(perf.maxLoopUs),
+                static_cast<unsigned long>(perf.maxPumpUs),
+                static_cast<unsigned long>(perf.maxSaveUs), static_cast<unsigned long>(perf.maxInputLatencyMs),
+                ESP.getFreeHeap());
+  perf = Perf{};
 }
 
-void printPetStatus() {
-  const PetState &pet = state.pet;
-  Serial.printf("{\"mascot\":%u,\"expression\":%u,\"reacting\":%s,\"picker_open\":%s}\n", pet.mascot,
-                static_cast<uint8_t>(pet.expression), pet.reacting ? "true" : "false",
-                pet.pickerOpen ? "true" : "false");
-}
-
-void printAssetStatus() {
-  Serial.printf("{\"assets_ready\":%s,\"asset_count\":%u,\"asset_bytes\":%lu,\"mascot\":%u,\"frame\":%lu,"
-                "\"picker_page\":%u}\n",
-                petAssetsReady() ? "true" : "false", petAssetCount(), static_cast<unsigned long>(petAssetBytes()),
-                state.pet.mascot, static_cast<unsigned long>(petVisualFrame(state, millis())), state.pet.pickerPage);
-}
-
-void printSelfTest() {
-  Serial.println(modelSelfTest() ? "SELFTEST PASS: alarm schedule, midnight, daily deduplication, timeout, swipe"
-                                 : "SELFTEST FAIL");
-}
-
-// Parses "<command> x y" and rejects trailing input or off-screen points.
-bool parsePoint(const char *format, int &x, int &y) {
-  char extra = 0;
-  return sscanf(serialLine.c_str(), format, &x, &y, &extra) == 2 && x >= 0 && x < SCREEN_WIDTH && y >= 0 &&
-         y < SCREEN_HEIGHT;
-}
-
-void runSerialCommand() {
-  int x = 0, y = 0;
-  if (serialLine == "status") printStatus();
-  else if (serialLine == "ui-stats") printUiStats();
-  else if (serialLine == "perf") {
-    Serial.printf("{\"perf\":true,\"loops\":%lu,\"renders\":%lu,\"avg_render_us\":%lu,\"max_render_us\":%lu,"
-                  "\"max_loop_us\":%lu,\"max_pump_us\":%lu,\"max_save_us\":%lu,\"max_input_latency_ms\":%lu,\"free_heap\":%u}\n",
-                  static_cast<unsigned long>(perf.loops), static_cast<unsigned long>(perf.renders),
-                  static_cast<unsigned long>(perf.renders ? perf.totalRenderUs / perf.renders : 0),
-                  static_cast<unsigned long>(perf.maxRenderUs), static_cast<unsigned long>(perf.maxLoopUs),
-                  static_cast<unsigned long>(perf.maxPumpUs),
-                  static_cast<unsigned long>(perf.maxSaveUs), static_cast<unsigned long>(perf.maxInputLatencyMs),
-                  ESP.getFreeHeap());
-    perf = Perf{};
-  }
-  else if (serialLine == "settings-status") printSettingsStatus();
-  else if (serialLine == "asset-selftest") testPetAssets();
-  else if (serialLine == "alarm-status") printAlarmStatus();
-  else if (serialLine == "pet-status") printPetStatus();
-  else if (serialLine == "asset-status") printAssetStatus();
-  else if (serialLine == "sound-test") requestSound();
-  else if (serialLine == "talk-status") printTalkStatus();
-  else if (serialLine == "mic-test") runMicTest();
-  else if (serialLine.startsWith("talk-tune ")) {
-    unsigned start = 0, end = 0;
-    char extra = 0;
-    if (sscanf(serialLine.c_str(), "talk-tune %u %u %c", &start, &end, &extra) == 2 && end > 0 && end <= start &&
-        start <= 5000) {
-      tuneTalk(start, end);
+void runConsoleCommand(const ConsoleLine &line) {
+  switch (line.command) {
+    case ConsoleCommand::None: break;
+    case ConsoleCommand::Status: printStatus(state); break;
+    case ConsoleCommand::UiStats: printUiStats(); break;
+    case ConsoleCommand::Perf: printPerf(); break;
+    case ConsoleCommand::SettingsStatus: printSettingsStatus(state); break;
+    case ConsoleCommand::AssetSelfTest: testPetAssets(); break;
+    case ConsoleCommand::AlarmStatus: printAlarmStatus(state); break;
+    case ConsoleCommand::PetStatus: printPetStatus(state); break;
+    case ConsoleCommand::AssetStatus: printAssetStatus(state); break;
+    case ConsoleCommand::SoundTest: requestSound(); break;
+    case ConsoleCommand::TalkStatus: printTalkStatus(); break;
+    case ConsoleCommand::MicTest: runMicTest(); break;
+    case ConsoleCommand::TalkTune:
+      tuneTalk(line.start, line.end);
       printTalkStatus();
-    } else {
-      logError("input", "Use talk-tune <start> <end> with 0 < end <= start <= 5000");
-    }
-  }
-  else if (serialLine == "reboot") ESP.restart();
-  else if (serialLine.startsWith("hold ")) {
-    if (parsePoint("hold %d %d %c", x, y)) handlePetHold(x, y, millis());
-    else logError("input", "Invalid hold coordinates");
-  } else if (serialLine.startsWith("tap ")) {
-    if (parsePoint("tap %d %d %c", x, y)) handleTap(x, y, millis());
-    else logError("input", "Invalid tap coordinates");
-  } else if (serialLine == "snapshot" && !state.setup.open) {
-    writeSnapshot();
-  } else if (serialLine.length() == 6 && serialLine.startsWith("page ") && serialLine[5] >= '0' &&
-             serialLine[5] < '0' + PAGE_COUNT) {
-    if (state.setup.open) closeConfig();
-    state.page = serialLine[5] - '0';
-    state.pet.pickerOpen = false;
-    state.lastInteraction = millis();
-  } else if (serialLine == "selftest") {
-    printSelfTest();
-  } else if (serialLine == "setup") {
-    openConfig();
-  } else if (serialLine == "pet") {
-    if (state.setup.open) closeConfig();
-    state.page = PAGE_PET;
-    state.pet.pickerOpen = false;
-  } else if (serialLine.startsWith("ap-password ")) {
-    const String password = serialLine.substring(12);
-    if (password.length() < 8 || password.length() > 63) {
-      logError("setup", "AP password must contain 8 to 63 characters");
-    } else if (preferences.putString("ap_password", password) == 0) {
-      logError("setup", "AP password NVS write failed");
-    } else {
-      Serial.println("{\"event\":\"ap_password_saved\"}");
-      if (state.setup.open) { closeConfig(); openConfig(); }
-    }
-  } else if (!serialLine.isEmpty()) {
-    Serial.println("Commands: status, selftest, setup, pet, talk-status, mic-test, reboot, ap-password <value>");
+      break;
+    case ConsoleCommand::Reboot: ESP.restart(); break;
+    case ConsoleCommand::Hold: handlePetHold(line.x, line.y, millis()); break;
+    case ConsoleCommand::Tap: handleTap(line.x, line.y, millis()); break;
+    case ConsoleCommand::Snapshot:
+      // The setup screen is never dumped; the command is answered with the help text instead.
+      if (state.setup.open) printConsoleHelp();
+      else writeSnapshot();
+      break;
+    case ConsoleCommand::Page:
+      if (state.setup.open) closeSetupPortal();
+      state.page = line.page;
+      state.pet.pickerOpen = false;
+      state.lastInteraction = millis();
+      break;
+    case ConsoleCommand::SelfTest: printSelfTest(); break;
+    case ConsoleCommand::Setup: openSetup(); break;
+    case ConsoleCommand::Pet:
+      if (state.setup.open) closeSetupPortal();
+      state.page = PAGE_PET;
+      state.pet.pickerOpen = false;
+      break;
+    case ConsoleCommand::ApPassword:
+      if (!saveApPassword(line.text)) {
+        logError("setup", "AP password NVS write failed");
+      } else {
+        Serial.println("{\"event\":\"ap_password_saved\"}");
+        if (state.setup.open) { closeSetupPortal(); openSetup(); }
+      }
+      break;
   }
 }
 
 void pollSerial() {
-  while (Serial.available()) {
-    const char c = Serial.read();
-    if (c == '\n') {
-      serialLine.trim();
-      runSerialCommand();
-      inputPending = true;
-      serialLine = "";
-    } else if (serialLine.length() < 80 && c >= 32 && c <= 126) {
-      serialLine += c;
-    }
+  ConsoleLine line;
+  while (readConsoleLine(line)) {
+    runConsoleCommand(line);
+    inputPending = true;
   }
-}
-
-// ---------------------------------------------------------------------------
-// Boot
-
-void loadSettings() {
-  PetState &pet = state.pet;
-  DeviceSettings &device = state.device;
-  AlarmSchedule &alarm = state.alarm;
-  pet.name = preferences.getString("pet", "Mochi");
-  pet.mascot = preferences.getUChar("mascot", 0);
-  state.weather.place = preferences.getUChar("place", 0);
-  if (state.weather.place >= PLACE_COUNT) state.weather.place = 0;
-  device.brightness = max(static_cast<uint8_t>(3), preferences.getUChar("bright", 170));
-  device.volume = min(static_cast<uint8_t>(100), preferences.getUChar("volume", 40));
-  device.muted = preferences.getBool("muted", false);
-  device.talk = preferences.getBool("talk", false);
-  alarm.hour = preferences.getUChar("alarm_hour", 7);
-  alarm.minute = preferences.getUChar("alarm_min", 0);
-  alarm.enabled = preferences.getBool("alarm_on", false);
-  alarm.lastFiredDay = preferences.getUInt("alarm_day", 0);
-  if (alarm.hour > 23 || alarm.minute > 59) {
-    logError("settings", "Invalid alarm schedule; alarm disabled");
-    alarm = AlarmSchedule{};
-  }
-  pet.tapCount = preferences.getUInt("pets", 0);
-  networkName = preferences.getString("ssid", "");
-  networkPassword = preferences.getString("password", "");
 }
 }  // namespace
 
@@ -926,8 +439,8 @@ void appSetup() {
   pinMode(PIN_SPEAKER_MUTE, OUTPUT);
   digitalWrite(PIN_SPEAKER_MUTE, HIGH);
   rgbLedWrite(PIN_STATUS_LED, 0, 0, 0);
-  const bool settingsOpen = preferences.begin("deskpet", false);
-  if (settingsOpen) loadSettings();
+  const bool settingsOpen = openSettingsStore();
+  if (settingsOpen) loadSettings(state, network);
   // The backlight comes up at the stored level, so a dim room is not flashed at boot.
   if (!initDisplay(state.device.brightness)) { fatalError = true; return; }
   if (!settingsOpen) {
@@ -941,7 +454,7 @@ void appSetup() {
   // The stored companion may have been removed from a newer asset pack.
   if (petAssetsReady() && state.pet.mascot >= petAssetCount()) {
     state.pet.mascot = 0;
-    if (preferences.putUChar("mascot", 0) == 0) logError("settings", "Replacement companion could not be saved");
+    if (!saveCompanion(0)) logError("settings", "Replacement companion could not be saved");
     Serial.println("{\"event\":\"removed_companion_replaced\",\"mascot\":0}");
   }
   state.pet.animationStartedAt = millis();
@@ -959,15 +472,12 @@ void appSetup() {
   if (!startTouchInput()) { logError("touch", "Touch task allocation failed"); fatalError = true; return; }
   showBootProgress("Connecting", 75);
   if (!startWeatherWorker()) { logError("weather", "Worker allocation failed"); fatalError = true; return; }
-  server.on("/", HTTP_GET, serveSetup);
-  server.on("/scan", HTTP_GET, handleScan);
-  server.on("/save", HTTP_POST, saveSetup);
-  server.onNotFound([]() { server.send(404, "text/plain", "Not found"); });
+  initSetupPortal(state, network, applySetupForm);
   setenv("TZ", TIMEZONE, 1);
   tzset();
   WiFi.mode(WIFI_STA);
   WiFi.setAutoReconnect(true);
-  if (networkName.isEmpty()) WiFi.begin(); else WiFi.begin(networkName.c_str(), networkPassword.c_str());
+  if (network.ssid.isEmpty()) WiFi.begin(); else WiFi.begin(network.ssid.c_str(), network.password.c_str());
   configTzTime(TIMEZONE, "pool.ntp.org", "time.cloudflare.com", "time.google.com");
   showBootProgress("Ready", 100);
   // If the UI loop is ever blocked for 5 s, reboot (and keep a core dump) instead of freezing.
@@ -979,7 +489,7 @@ void appSetup() {
   state.lastInteraction = millis();
   lastReconnect = millis();
   printSelfTest();
-  printStatus();
+  printStatus(state);
 }
 
 void appLoop() {
@@ -990,11 +500,11 @@ void appLoop() {
   pollButton(inputAt);
   pollSerial();
   const uint32_t now = millis();
-  if (state.setup.open) server.handleClient();
+  if (state.setup.open) pollSetupPortal();
   if (pendingConnectAt != 0 && static_cast<int32_t>(now - pendingConnectAt) >= 0) {
     pendingConnectAt = 0;
     WiFi.disconnect(false, false);
-    WiFi.begin(networkName.c_str(), networkPassword.c_str());
+    WiFi.begin(network.ssid.c_str(), network.password.c_str());
     lastReconnect = now;
   }
 
@@ -1008,7 +518,7 @@ void appLoop() {
   // Offer the setup portal once if the device has never reached Wi-Fi and nobody is using it.
   if (!connected && !everConnected && !setupOffered && now > 18000 && !state.setup.open &&
       now - state.lastInteraction > 15000) {
-    openConfig();
+    openSetup();
   }
   if (!connected && now - lastReconnect > 60000) { WiFi.reconnect(); lastReconnect = now; }
 
@@ -1044,13 +554,9 @@ void appLoop() {
     rgbLedWrite(PIN_STATUS_LED, nextLed ? 32 : 0, 0, nextLed ? 10 : 0);
     alarmLed = nextLed;
   }
-  if (savePending && now - lastSave > 15000) {
-    if (preferences.putUInt("pets", state.pet.tapCount) == 0) logError("settings", "Pet counter write failed");
-    else savePending = false;
-    lastSave = now;
-  }
+  saveTapCount(state.pet.tapCount, now);
   const uint32_t saveStarted = micros();
-  saveDeviceSettings(now);
+  saveDeviceSettings(state, now);
   perf.maxSaveUs = max(perf.maxSaveUs, micros() - saveStarted);
   const uint8_t brightness = state.device.brightness;
   const bool idle = !state.alarmRinging && !state.setup.open && state.page != PAGE_SETTINGS &&
