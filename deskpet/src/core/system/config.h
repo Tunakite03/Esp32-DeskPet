@@ -2,7 +2,7 @@
 #include <stdint.h>
 
 // Bump only the number; the boot splash, settings page and serial status read it from here.
-#define DESKPET_VERSION_NUMBER "1.8.0"
+#define DESKPET_VERSION_NUMBER "1.8.1"
 inline constexpr char VERSION_NUMBER[] = DESKPET_VERSION_NUMBER;
 inline constexpr char VERSION[] = "DeskPet " DESKPET_VERSION_NUMBER;
 inline constexpr char TIMEZONE[] = "ICT-7";
