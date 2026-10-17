@@ -1,0 +1,84 @@
+# Tests the web customizer and publishes it to GitHub Pages.
+# Pull requests only run the tests; a push to master also deploys to
+# https://tunakite03.github.io/Esp32-DeskPet/web/
+name: Customizer
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - "web/**"
+      - "deskpet/assets/pets.bin"
+      - "deskpet/assets/manifest.json"
+      - "deskpet/assets/page-mascot/**"
+      - ".github/workflows/customizer.yml"
+  pull_request:
+    paths:
+      - "web/**"
+      - "deskpet/assets/pets.bin"
+      - "deskpet/assets/manifest.json"
+      - "deskpet/assets/page-mascot/**"
+      - ".github/workflows/customizer.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: customizer-${{ github.ref }}
+  # Never cut a Pages deployment short; superseded PR runs can stop.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Check the page scripts parse
+        run: node --check web/app.js && node --check web/pack.js
+      - name: Test the pack reader and writer
+        run: node --test web/pack.test.mjs
+
+  build:
+    needs: test
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # The page loads ../deskpet/assets/pets.bin and links the example sheets,
+      # so the site keeps the repository layout for those paths.
+      - name: Assemble the site
+        run: |
+          mkdir -p _site/web _site/deskpet/assets
+          cp web/index.html web/app.js web/pack.js _site/web/
+          cp deskpet/assets/pets.bin _site/deskpet/assets/
+          cp -r deskpet/assets/page-mascot _site/deskpet/assets/
+          cat > _site/index.html <<'HTML'
+          <!doctype html>
+          <meta charset="utf-8">
+          <title>DeskPet Customizer</title>
+          <meta http-equiv="refresh" content="0; url=web/">
+          <a href="web/">DeskPet Customizer</a>
+          HTML
+          touch _site/.nojekyll
+          find _site -type f | sort
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}web/
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

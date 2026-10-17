@@ -207,17 +207,23 @@ choose your Wi-Fi and weather location.
 
 `web/index.html` edits the asset pack and writes it to the `assets` partition
 (`0x610000`) only, so Wi-Fi, the alarm and other settings stay as they are.
-It needs Chrome or Edge on a computer (Web Serial). Serve the repository root
-over HTTP so the page can load the default pack, then open the page:
+It needs Chrome or Edge on a computer (Web Serial).
+
+Open it online at <https://tunakite03.github.io/Esp32-DeskPet/web/>. The
+`Customizer` workflow (`.github/workflows/customizer.yml`) runs the page's
+tests on every pull request and push, and redeploys the page whenever `web/`
+or the asset pack changes on `master`.
+
+To run it locally, serve the repository root over HTTP so the page can load
+the default pack:
 
 ```bash
 python3 web/serve.py
 ```
 
-Open <http://localhost:8000/web/>. Use `web/serve.py` rather than
+Then open <http://localhost:8000/web/>. Use `web/serve.py` rather than
 `python -m http.server`: on Windows the latter often sends `.js` as
-`text/plain`, and the browser then refuses to run the page. With GitHub Pages enabled for the
-repository, the same page works at `https://<user>.github.io/Esp32-DeskPet/web/`.
+`text/plain`, and the browser then refuses to run the page.
 
 - **Companions**: rename, reorder or remove them (3 to 16 in a pack). The
   easiest way to add one is the [page-mascot gallery](https://koboyo.com/page-mascot):
