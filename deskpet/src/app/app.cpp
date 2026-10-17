@@ -1,12 +1,15 @@
 #include <Arduino.h>
+#include <ArduinoJson.h>
 #include <Preferences.h>
 #include <WebServer.h>
 #include <WiFi.h>
 #include <Wire.h>
+#include <algorithm>
 #include <esp_system.h>
 #include <esp_task_wdt.h>
 #include <sys/time.h>
 #include <time.h>
+#include <vector>
 #include "src/core/audio/audio.h"
 #include "src/core/system/config.h"
 #include "src/features/ui/layout.h"
@@ -96,9 +99,99 @@ bool parseUnsigned(const String &input, uint32_t minimum, uint32_t maximum, uint
 // ---------------------------------------------------------------------------
 // Setup portal (SoftAP + web form)
 
+struct ScannedNetwork {
+  String ssid;
+  int32_t rssi;
+  bool secure;
+};
+
+void triggerWifiScan() {
+  if (WiFi.scanComplete() != -1) {
+    WiFi.scanDelete();
+    WiFi.scanNetworks(true);
+  }
+}
+
+std::vector<ScannedNetwork> getScannedNetworks() {
+  std::vector<ScannedNetwork> list;
+  const int16_t count = WiFi.scanComplete();
+  if (count <= 0) return list;
+
+  list.reserve(count > 30 ? 30 : count);
+  for (int16_t i = 0; i < count; ++i) {
+    String ssid = WiFi.SSID(i);
+    ssid.trim();
+    if (ssid.isEmpty()) continue;
+
+    const int32_t rssi = WiFi.RSSI(i);
+    const bool secure = WiFi.encryptionType(i) != WIFI_AUTH_OPEN;
+
+    bool found = false;
+    for (auto &net : list) {
+      if (net.ssid == ssid) {
+        found = true;
+        if (rssi > net.rssi) {
+          net.rssi = rssi;
+          net.secure = secure;
+        }
+        break;
+      }
+    }
+    if (!found) {
+      list.push_back({ssid, rssi, secure});
+    }
+  }
+
+  std::sort(list.begin(), list.end(), [](const ScannedNetwork &a, const ScannedNetwork &b) {
+    return a.rssi > b.rssi;
+  });
+
+  if (list.size() > 30) list.resize(30);
+  return list;
+}
+
 bool setupClientAllowed() {
   const IPAddress address = server.client().remoteIP();
   return state.setup.open && address[0] == 192 && address[1] == 168 && address[2] == 4;
+}
+
+void handleScan() {
+  if (!setupClientAllowed()) {
+    server.send(403, "application/json", "{\"error\":\"forbidden\"}");
+    return;
+  }
+  if (server.hasArg("rescan")) {
+    triggerWifiScan();
+    server.sendHeader("Cache-Control", "no-store");
+    server.send(200, "application/json", "{\"status\":\"scanning\"}");
+    return;
+  }
+  const int16_t status = WiFi.scanComplete();
+  if (status == -1) {
+    server.sendHeader("Cache-Control", "no-store");
+    server.send(200, "application/json", "{\"status\":\"scanning\"}");
+    return;
+  }
+  if (status == -2) {
+    triggerWifiScan();
+    server.sendHeader("Cache-Control", "no-store");
+    server.send(200, "application/json", "{\"status\":\"scanning\"}");
+    return;
+  }
+  const std::vector<ScannedNetwork> networks = getScannedNetworks();
+  JsonDocument doc;
+  doc["status"] = "done";
+  JsonArray arr = doc["networks"].to<JsonArray>();
+  for (const auto &net : networks) {
+    JsonObject obj = arr.add<JsonObject>();
+    obj["ssid"] = net.ssid;
+    obj["rssi"] = net.rssi;
+    obj["secure"] = net.secure;
+  }
+  String response;
+  serializeJson(doc, response);
+  server.sendHeader("Cache-Control", "no-store");
+  server.send(200, "application/json", response);
 }
 
 void serveSetup() {
@@ -106,36 +199,159 @@ void serveSetup() {
     server.send(403, "text/plain", "Connect to the setup Wi-Fi shown on the device.");
     return;
   }
-  String html = R"HTML(<!doctype html><html lang="en"><meta charset="utf-8">)HTML"
+  const int16_t scanStatus = WiFi.scanComplete();
+  std::vector<ScannedNetwork> scanned;
+  if (scanStatus >= 0) {
+    scanned = getScannedNetworks();
+  } else if (scanStatus == -2) {
+    triggerWifiScan();
+  }
+
+  String html = R"HTML(<!doctype html><html lang="en"><head><meta charset="utf-8">)HTML"
       R"HTML(<meta name="viewport" content="width=device-width,initial-scale=1"><title>DeskPet setup</title>)HTML"
-      R"HTML(<style>body{background:#101724;color:#e9f3ef;font:16px system-ui;margin:30px auto;padding:20px;)HTML"
-      R"HTML(max-width:440px}h1{color:#7de2b7}label{display:block;margin:18px 0 7px})HTML"
-      R"HTML(input,select,button{box-sizing:border-box;width:100%;padding:13px;border:1px solid #405063;)HTML"
-      R"HTML(border-radius:10px;background:#1c293b;color:#fff}button{background:#7de2b7;color:#101724;)HTML"
-      R"HTML(margin-top:24px;font-weight:700}small{color:#a3b2be}</style>)HTML"
+      R"HTML(<style>body{background:#101724;color:#e9f3ef;font:16px system-ui;margin:30px auto;padding:20px;max-width:440px})HTML"
+      R"HTML(h1{color:#7de2b7;margin:0 0 10px}label{display:block;margin:18px 0 7px})HTML"
+      R"HTML(input,select,button{box-sizing:border-box;width:100%;padding:13px;border:1px solid #405063;border-radius:10px;background:#1c293b;color:#fff;font-size:15px})HTML"
+      R"HTML(input:focus,select:focus{border-color:#7de2b7;outline:none})HTML"
+      R"HTML(button{background:#7de2b7;color:#101724;margin-top:24px;font-weight:700;cursor:pointer})HTML"
+      R"HTML(small{color:#a3b2be;display:block;margin-top:4px})HTML"
+      R"HTML(.wifi-hdr{display:flex;justify-content:space-between;align-items:center;margin:18px 0 7px})HTML"
+      R"HTML(.wifi-hdr label{margin:0})HTML"
+      R"HTML(.btn-scan{width:auto;margin:0;padding:6px 14px;font-size:13px;font-weight:600;background:#24354a;color:#7de2b7;border:1px solid #405063;border-radius:8px;cursor:pointer})HTML"
+      R"HTML(.btn-scan:disabled{opacity:0.6;cursor:wait})HTML"
+      R"HTML(#manual_box{margin-top:8px;display:none})HTML"
+      R"HTML(noscript #manual_box{display:block !important})HTML"
+      R"HTML(noscript #wifi_select_wrap{display:none !important}</style></head><body>)HTML"
       R"HTML(<h1>Your little desk companion</h1>)HTML"
       R"HTML(<p>Set up once. Clock and alarms work offline after the time is synced.</p>)HTML"
       R"HTML(<form method="post" action="/save"><input type="hidden" name="token" value=")HTML";
   html += formToken;
-  html += R"HTML("><label>Wi-Fi name</label>)HTML"
-      R"HTML(<input name=ssid maxlength=32 autocomplete=off placeholder="Leave blank to keep current network">)HTML"
-      R"HTML(<label>Wi-Fi password</label>)HTML"
-      R"HTML(<input name=password type=password maxlength=63 autocomplete=new-password )HTML"
-      R"HTML(placeholder="Not shown or logged">)HTML"
-      R"HTML(<label>Pet name</label><input name=pet maxlength=12 required value=")HTML";
+  html += R"HTML("><div id="wifi_select_wrap"><div class="wifi-hdr">)HTML"
+          R"HTML(<label for="wifi_select">Wi-Fi network</label>)HTML"
+          R"HTML(<button type="button" class="btn-scan" id="scan_btn">Scan</button></div>)HTML";
+
+  const String defaultLabel = networkName.isEmpty() ? "-- Select a Wi-Fi network --"
+                                                    : "-- Keep current network (" + escapeHtml(networkName) + ") --";
+  html += "<select id=\"wifi_select\" data-default=\"" + defaultLabel + "\">";
+  html += "<option value=\"\">" + defaultLabel + "</option>";
+
+  if (!scanned.empty()) {
+    for (const auto &net : scanned) {
+      String label = "📶 " + escapeHtml(net.ssid);
+      if (net.secure) label += " 🔒";
+      label += " (" + String(net.rssi) + " dBm)";
+      html += "<option value=\"" + escapeHtml(net.ssid) + "\" data-secure=\"" + (net.secure ? "1" : "0") + "\">" +
+              label + "</option>";
+    }
+  } else {
+    html += R"HTML(<option value="" disabled id="scan_opt">Scanning nearby networks...</option>)HTML";
+  }
+  html += R"HTML(<option value="__manual__">&#9998; Enter manually / Hidden network...</option></select></div>)HTML";
+
+  html += R"HTML(<div id="manual_box"><label for="ssid">Wi-Fi name</label>)HTML"
+          R"HTML(<input name="ssid" id="ssid" maxlength="32" autocomplete="off" placeholder=")HTML";
+  html += networkName.isEmpty() ? "Enter Wi-Fi name" : "Leave blank to keep current network";
+  html += R"HTML("></div>)HTML";
+
+  html += R"HTML(<label for="password">Wi-Fi password</label>)HTML"
+          R"HTML(<input name="password" id="password" type="password" maxlength="63" autocomplete="new-password" )HTML"
+          R"HTML(placeholder="Not shown or logged">)HTML"
+          R"HTML(<label for="pet">Pet name</label><input name="pet" id="pet" maxlength="12" required value=")HTML";
   html += escapeHtml(state.pet.name);
   html += R"HTML("><small>Use English letters, numbers or spaces.</small>)HTML"
-      R"HTML(<label>Weather location</label><select name=place>)HTML";
+          R"HTML(<label for="place">Weather location</label><select name="place" id="place">)HTML";
   for (uint8_t i = 0; i < PLACE_COUNT; ++i) {
     html += "<option value=" + String(i) + (state.weather.place == i ? " selected>" : ">") + PLACES[i].name +
             "</option>";
   }
-  html += R"HTML(</select><label>Brightness</label><input type=range name=brightness min=3 max=255 value=)HTML";
+  html += R"HTML(</select><label for="brightness">Brightness</label><input type="range" name="brightness" id="brightness" min="3" max="255" value=)HTML";
   html += String(state.device.brightness);
-  html += R"HTML(><input type=hidden name=epoch id=epoch><button>Save and sync phone time</button></form>)HTML"
-      R"HTML(<p><small>Weather: Open-Meteo.com. Time zone: Vietnam (UTC+7). No account required.</small></p>)HTML"
-      R"HTML(<script>document.querySelector('form').addEventListener('submit',()=>{)HTML"
-      R"HTML(document.getElementById('epoch').value=Math.floor(Date.now()/1000)})</script></html>)HTML";
+  html += R"HTML(><input type="hidden" name="epoch" id="epoch"><button type="submit">Save and sync phone time</button></form>)HTML"
+          R"HTML(<p><small>Weather: Open-Meteo.com. Time zone: Vietnam (UTC+7). No account required.</small></p>)HTML";
+
+  html += R"HTML(<script>
+const sel=document.getElementById('wifi_select');
+const ssidInp=document.getElementById('ssid');
+const manBox=document.getElementById('manual_box');
+const passInp=document.getElementById('password');
+const scanBtn=document.getElementById('scan_btn');
+let pollTimer=null;
+sel.addEventListener('change',function(){
+  if(this.value==='__manual__'){
+    ssidInp.value='';manBox.style.display='block';ssidInp.focus();
+  }else if(this.value===''){
+    ssidInp.value='';manBox.style.display='none';
+  }else{
+    ssidInp.value=this.value;manBox.style.display='none';
+    const opt=this.options[this.selectedIndex];
+    if(opt&&opt.getAttribute('data-secure')==='0'){
+      passInp.placeholder='Open network (no password)';
+    }else{
+      passInp.placeholder='Not shown or logged';
+    }
+    passInp.focus();
+  }
+});
+function updateOptions(networks){
+  const cur=ssidInp.value;
+  sel.innerHTML='';
+  const defOpt=document.createElement('option');
+  defOpt.value='';
+  defOpt.textContent=sel.getAttribute('data-default');
+  sel.appendChild(defOpt);
+  let matched=false;
+  networks.forEach(function(n){
+    const opt=document.createElement('option');
+    opt.value=n.ssid;
+    opt.setAttribute('data-secure',n.secure?'1':'0');
+    opt.textContent='📶 '+n.ssid+(n.secure?' 🔒':'')+' ('+n.rssi+' dBm)';
+    if(n.ssid===cur){opt.selected=true;matched=true;}
+    sel.appendChild(opt);
+  });
+  const manOpt=document.createElement('option');
+  manOpt.value='__manual__';
+  manOpt.textContent='✏️ Enter manually / Hidden network...';
+  if(!matched&&cur){manOpt.selected=true;manBox.style.display='block';}
+  sel.appendChild(manOpt);
+}
+function pollScan(){
+  fetch('/scan')
+    .then(function(r){return r.json();})
+    .then(function(d){
+      if(d.status==='done'&&d.networks){
+        updateOptions(d.networks);
+        scanBtn.disabled=false;
+        scanBtn.textContent='Scan';
+      }else{
+        pollTimer=setTimeout(pollScan,1200);
+      }
+    })
+    .catch(function(){scanBtn.disabled=false;scanBtn.textContent='Scan';});
+}
+function startScan(rescan){
+  scanBtn.disabled=true;
+  scanBtn.textContent='Scanning...';
+  if(pollTimer)clearTimeout(pollTimer);
+  fetch(rescan?'/scan?rescan=1':'/scan')
+    .then(function(r){return r.json();})
+    .then(function(d){
+      if(d.status==='done'&&d.networks&&!rescan){
+        updateOptions(d.networks);
+        scanBtn.disabled=false;
+        scanBtn.textContent='Scan';
+      }else{
+        pollTimer=setTimeout(pollScan,1200);
+      }
+    })
+    .catch(function(){scanBtn.disabled=false;scanBtn.textContent='Scan';});
+}
+scanBtn.addEventListener('click',function(){startScan(true);});
+if(document.getElementById('scan_opt')){startScan(false);}
+document.querySelector('form').addEventListener('submit',function(){
+  document.getElementById('epoch').value=Math.floor(Date.now()/1000);
+});
+</script></body></html>)HTML";
+
   server.sendHeader("Cache-Control", "no-store");
   server.send(200, "text/html", html);
 }
@@ -183,6 +399,7 @@ void saveSetup() {
     networkName = ssid; networkPassword = password;
     pendingConnectAt = millis() + 1000;
   }
+  WiFi.scanDelete();
   state.pet.name = name;
   state.weather.place = newPlace;
   state.device.brightness = newBrightness;
@@ -216,13 +433,16 @@ void openConfig() {
   }
   state.setup.open = true;
   setupOffered = true;
+  triggerWifiScan();
   server.begin();
   Serial.println("{\"event\":\"setup_open\",\"url\":\"http://192.168.4.1\"}");
 }
 
 void closeConfig() {
   server.stop();
+  WiFi.scanDelete();
   WiFi.softAPdisconnect(true);
+  WiFi.mode(WIFI_STA);
   state.setup.open = false;
   state.setup.apPassword = "";
   formToken = "";
@@ -740,6 +960,7 @@ void appSetup() {
   showBootProgress("Connecting", 75);
   if (!startWeatherWorker()) { logError("weather", "Worker allocation failed"); fatalError = true; return; }
   server.on("/", HTTP_GET, serveSetup);
+  server.on("/scan", HTTP_GET, handleScan);
   server.on("/save", HTTP_POST, saveSetup);
   server.onNotFound([]() { server.send(404, "text/plain", "Not found"); });
   setenv("TZ", TIMEZONE, 1);
