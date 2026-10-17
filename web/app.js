@@ -147,6 +147,12 @@ function renderPets() {
     drawFrame(canvas, pet, pet.kind === KIND_POSES ? POSE_FRAME_FRONT : 0);
     canvas.addEventListener("mouseenter", () => startPreview(canvas, pet));
     canvas.addEventListener("mouseleave", () => stopPreview(canvas, pet));
+    // Touch screens have no hover: a tap starts or stops the preview.
+    canvas.addEventListener("pointerup", (event) => {
+      if (event.pointerType === "mouse") return;
+      if (previewTimers.has(canvas)) stopPreview(canvas, pet);
+      else startPreview(canvas, pet);
+    });
 
     const name = document.createElement("input");
     name.type = "text";
@@ -165,7 +171,8 @@ function renderPets() {
     info.className = "muted";
     info.textContent = pet.kind === KIND_POSES
       ? "Posed · follows touch"
-      : `Animation · ${pet.frames.length} frames · ${(pet.duration / 1000).toFixed(1)} s`;
+      : `Animation · ${pet.frames.length === 1 ? "still" : `${pet.frames.length} frames`} · ` +
+        `${(pet.duration / 1000).toFixed(1)} s`;
 
     const actions = document.createElement("div");
     actions.className = "actions";
@@ -327,23 +334,31 @@ async function makeAnimatedPet(name, file) {
   }
 }
 
+let adding = false;
+
 /** @param {string} nameId @param {() => Promise<PackPet | null>} make */
 async function addPet(nameId, make) {
+  if (adding) return;
   const name = $(nameId).value.trim();
   const problem = nameProblem(name);
   if (problem) { setStatus("add-status", `Name: ${problem}.`, "error"); return; }
   if (pack.pets.length >= MAX_PETS) { setStatus("add-status", `The pack already holds ${MAX_PETS}.`, "error"); return; }
   setStatus("add-status", "Converting…", "");
+  // A second click while converting would add the same companion twice.
+  adding = true;
+  $("add-posed").disabled = $("add-animated").disabled = true;
   try {
     const pet = await make();
     if (!pet) return;
     pack = { ...pack, pets: [...pack.pets, pet] };
     $(nameId).value = "";
-    renderPets();
     refreshBuild();
     setStatus("add-status", `${name} added.`, "ok");
   } catch (error) {
     setStatus("add-status", describe(error), "error");
+  } finally {
+    adding = false;
+    renderPets();
   }
 }
 
@@ -351,6 +366,7 @@ async function addPet(nameId, make) {
 // Ringtone
 
 function renderRingtone() {
+  stopRingtone();  // the old sound must not keep playing once it is replaced
   $("ringtone-state").textContent = pack.ringtone
     ? `Custom ringtone, ${(pack.ringtone.length / SAMPLE_RATE).toFixed(1)} s.`
     : "Built-in ringtone (the one compiled into the firmware).";
@@ -358,12 +374,15 @@ function renderRingtone() {
   $("ringtone-remove").disabled = !pack.ringtone;
 }
 
+let sourceName = "";
+
 /** @param {File} file */
 async function openRingtone(file) {
   setStatus("ringtone-status", "Decoding…", "");
   try {
     const context = new OfflineAudioContext(1, 1, SAMPLE_RATE);
     sourceAudio = await context.decodeAudioData(await file.arrayBuffer());
+    sourceName = file.name;
     $("ringtone-start").value = "0";
     $("ringtone-end").value = Math.min(sourceAudio.duration, MAX_SECONDS).toFixed(1);
     for (const id of ["ringtone-start", "ringtone-end", "ringtone-apply"]) $(id).disabled = false;
@@ -372,6 +391,9 @@ async function openRingtone(file) {
   } catch (error) {
     sourceAudio = null;
     setStatus("ringtone-status", `The audio could not be decoded: ${describe(error)}`, "error");
+  } finally {
+    // Choosing the same file again should still fire "change".
+    $("ringtone-file").value = "";
   }
 }
 
@@ -379,19 +401,19 @@ async function applyRingtone() {
   if (!sourceAudio) return;
   const start = Number($("ringtone-start").value);
   const end = Math.min(Number($("ringtone-end").value), sourceAudio.duration);
-  if (!(start >= 0 && end > start)) { setStatus("ringtone-status", "End must be after start.", "error"); return; }
-  if (end - start > MAX_SECONDS) {
+  const length = Math.round((end - start) * SAMPLE_RATE);
+  if (!(start >= 0 && length >= 1)) { setStatus("ringtone-status", "End must be after start.", "error"); return; }
+  if (length > MAX_RINGTONE_SAMPLES) {
     setStatus("ringtone-status", `Choose at most ${MAX_SECONDS} seconds.`, "error");
     return;
   }
-  const length = Math.round((end - start) * SAMPLE_RATE);
-  const context = new OfflineAudioContext(1, length, SAMPLE_RATE);
-  const source = context.createBufferSource();
-  source.buffer = sourceAudio;
-  source.connect(context.destination);
-  source.start(0, start, end - start);
-  const rendered = await context.startRendering();
   try {
+    const context = new OfflineAudioContext(1, length, SAMPLE_RATE);
+    const source = context.createBufferSource();
+    source.buffer = sourceAudio;
+    source.connect(context.destination);
+    source.start(0, start, end - start);
+    const rendered = await context.startRendering();
     pack = { ...pack, ringtone: toRingtonePcm(rendered.getChannelData(0)) };
   } catch (error) {
     setStatus("ringtone-status", describe(error), "error");
@@ -399,14 +421,19 @@ async function applyRingtone() {
   }
   renderRingtone();
   refreshBuild();
-  setStatus("ringtone-status", `Using ${start.toFixed(1)}–${end.toFixed(1)} s.`, "ok");
+  setStatus("ringtone-status", `Using ${start.toFixed(1)}–${end.toFixed(1)} s of ${sourceName} ` +
+            `(${sourceAudio.duration.toFixed(1)} s long).`, "ok");
 }
 
 /** @type {AudioBufferSourceNode | null} */
 let playing = null;
 
+function stopRingtone() {
+  if (playing) playing.stop();
+}
+
 function playRingtone() {
-  if (playing) { playing.stop(); return; }
+  if (playing) { stopRingtone(); return; }
   if (!pack.ringtone) return;
   const context = new AudioContext();
   const buffer = context.createBuffer(1, pack.ringtone.length, SAMPLE_RATE);
@@ -431,7 +458,10 @@ function refreshBuild() {
       `(${share.toFixed(1)}%)`;
     $("size-bar").style.width = `${share}%`;
     $("version-text").textContent = pack.ringtone ? "Pack v2 · needs firmware 1.9.0+" : "Pack v1 · any firmware";
-    setStatus("build-status", "", "");
+    const names = pack.pets.map((pet) => pet.name.trim().toLowerCase());
+    const repeated = pack.pets.find((pet, index) => names.indexOf(names[index]) !== index);
+    setStatus("build-status", repeated ? `Two companions are called ${repeated.name}; the picker on the board ` +
+              "cannot tell them apart." : "", repeated ? "warn" : "");
   } catch (error) {
     builtPack = null;
     setStatus("build-status", describe(error), "error");
@@ -446,7 +476,8 @@ function download() {
   link.href = URL.createObjectURL(new Blob([builtPack], { type: "application/octet-stream" }));
   link.download = "pets.bin";
   link.click();
-  URL.revokeObjectURL(link.href);
+  // Revoking right away can cancel the download in some browsers.
+  setTimeout(() => URL.revokeObjectURL(link.href), 60000);
 }
 
 /** @param {string} line */
@@ -470,7 +501,12 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
  * @returns {Promise<Record<string, unknown> | null>} null when nothing answered in time
  */
 async function askFirmware(port, command, key, timeoutMs) {
-  await port.open({ baudRate: CONSOLE_BAUD });
+  try {
+    await port.open({ baudRate: CONSOLE_BAUD });
+  } catch (error) {
+    throw new PackError(`The serial port could not be opened (${describe(error)}). Close the Arduino Serial ` +
+                        "Monitor, other browser tabs or any program using the board, then try again.");
+  }
   const reader = /** @type {ReadableStreamDefaultReader<Uint8Array>} */ (port.readable?.getReader());
   const writer = /** @type {WritableStreamDefaultWriter<Uint8Array>} */ (port.writable?.getWriter());
   const send = () => writer.write(new TextEncoder().encode(`${command}\n`));
@@ -525,6 +561,7 @@ async function flash() {
   refreshBuild();
   $("flash-log").textContent = "";
   $("flash-bar").style.width = "0%";
+  $("flash-meter").hidden = false;
   /** @type {any} */
   let transport = null;
   try {
@@ -588,6 +625,7 @@ async function flash() {
   } catch (error) {
     if (error instanceof DOMException && error.name === "NotFoundError") {
       setStatus("flash-status", "No board was chosen.", "warn");
+      $("flash-meter").hidden = true;
     } else {
       setStatus("flash-status", describe(error), "error");
       log(`Error: ${describe(error)}`);

@@ -27,7 +27,12 @@
   section { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
             padding: 18px; margin-bottom: 16px; }
   .row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+  .row.bottom { align-items: flex-end; }
+  .row > p { margin: 0; }
   .spread { justify-content: space-between; }
+  .stack { margin-bottom: 12px; }
+  .note { margin-top: 10px; }
+  .meter[hidden] { display: none; }
   .muted { color: var(--muted); font-size: 13px; }
   button, .button { font: inherit; border: 1px solid var(--line); background: var(--surface-2); color: var(--text);
                     border-radius: 8px; padding: 7px 14px; cursor: pointer; }
@@ -36,7 +41,7 @@
   button:disabled { opacity: .45; cursor: not-allowed; }
   input[type=text], input[type=number] { font: inherit; color: var(--text); background: var(--bg);
                     border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; }
-  input[type=number] { width: 90px; }
+  input[type=number] { width: 80px; }
   input:invalid { border-color: var(--danger); }
   input[type=file] { font-size: 13px; max-width: 100%; }
   label.field { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--muted); }
@@ -141,16 +146,20 @@
 
   <section>
     <h2>Alarm ringtone</h2>
-    <p id="ringtone-state" class="muted"></p>
-    <div class="row">
+    <div class="row spread stack">
+      <p id="ringtone-state"></p>
+      <div class="row">
+        <button id="ringtone-play" disabled>Play</button>
+        <button id="ringtone-remove" disabled>Use the built-in ringtone</button>
+      </div>
+    </div>
+    <div class="row bottom">
       <label class="button">Choose audio<input id="ringtone-file" type="file" accept="audio/*" hidden></label>
       <label class="field">Start (s)<input id="ringtone-start" type="number" min="0" step="0.1" value="0" disabled></label>
       <label class="field">End (s)<input id="ringtone-end" type="number" min="0" step="0.1" value="0" disabled></label>
       <button id="ringtone-apply" disabled>Use this part</button>
-      <button id="ringtone-play" disabled>Play</button>
-      <button id="ringtone-remove" disabled>Use the built-in ringtone</button>
     </div>
-    <p class="muted">Converted to 16 kHz mono, at most 30 seconds, and looped while the alarm rings.
+    <p class="muted note">Converted to 16 kHz mono, at most 30 seconds, and looped while the alarm rings.
       A custom ringtone needs firmware 1.9.0 or newer.</p>
     <p id="ringtone-status" class="status"></p>
   </section>
@@ -164,13 +173,18 @@
       <button id="flash" class="primary">Flash to DeskPet</button>
       <button id="download">Download pets.bin</button>
     </div>
-    <p class="muted">Flashing needs Chrome or Edge on a computer, with the board plugged in over USB.
+    <p class="muted note">Flashing needs Chrome or Edge on a computer, with the board plugged in over USB.
       To flash the downloaded file yourself, write it at <code>0x610000</code>.</p>
-    <div class="meter"><div id="flash-bar"></div></div>
+    <div id="flash-meter" class="meter" hidden><div id="flash-bar"></div></div>
     <p id="flash-status" class="status"></p>
     <pre id="flash-log" class="log" hidden></pre>
   </section>
 </main>
-<script type="module" src="app.js"></script>
+<script type="module" src="app.js" onerror="
+  document.getElementById('pack-source').innerHTML = 'The page script did not load, so nothing here works yet. ' +
+    'Opened as a file, or served as text/plain by <code>python -m http.server</code> on Windows? ' +
+    'Run <code>python web/serve.py</code> in the repository and open ' +
+    '<a href=&quot;http://localhost:8000/web/&quot;>http://localhost:8000/web/</a>.';
+  document.getElementById('pack-source').className = 'status error';"></script>
 </body>
 </html>

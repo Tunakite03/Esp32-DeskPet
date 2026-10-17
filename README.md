@@ -210,10 +210,12 @@ It needs Chrome or Edge on a computer (Web Serial). Serve the repository root
 over HTTP so the page can load the default pack, then open the page:
 
 ```bash
-python3 -m http.server 8000
+python3 web/serve.py
 ```
 
-Open <http://localhost:8000/web/>. With GitHub Pages enabled for the
+Open <http://localhost:8000/web/>. Use `web/serve.py` rather than
+`python -m http.server`: on Windows the latter often sends `.js` as
+`text/plain`, and the browser then refuses to run the page. With GitHub Pages enabled for the
 repository, the same page works at `https://<user>.github.io/Esp32-DeskPet/web/`.
 
 - **Companions**: rename, reorder or remove them (3 to 16 in a pack). The
