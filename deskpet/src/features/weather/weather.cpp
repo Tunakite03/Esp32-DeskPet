@@ -1,4 +1,4 @@
-#include "weather.h"
+#include "src/features/weather/weather.h"
 
 #include <Arduino.h>
 #include <ArduinoJson.h>
@@ -6,9 +6,9 @@
 #include <WiFi.h>
 #include <lwip/netdb.h>
 #include <math.h>
-#include "config.h"
-#include "timekeeping.h"
-#include "weather_ca.h"
+#include "src/core/system/config.h"
+#include "src/core/system/timekeeping.h"
+#include "src/features/weather/weather_ca.h"
 
 namespace {
 constexpr char WEATHER_HOST[] = "api.open-meteo.com";

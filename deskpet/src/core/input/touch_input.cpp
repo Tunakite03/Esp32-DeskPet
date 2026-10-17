@@ -1,10 +1,10 @@
-#include "touch_input.h"
+#include "src/core/input/touch_input.h"
 
 #include <Arduino.h>
 #include <Wire.h>
 #include <atomic>
-#include "config.h"
-#include "log.h"
+#include "src/core/system/config.h"
+#include "src/core/system/log.h"
 
 namespace {
 constexpr uint8_t TOUCH_ADDRESS = 0x38;  // FT6336

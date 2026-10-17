@@ -1,8 +1,8 @@
 #pragma once
 #include <Arduino.h>
-#include "model.h"
-#include "pet_assets.h"
-#include "weather.h"
+#include "src/app/model.h"
+#include "src/features/pet/pet_assets.h"
+#include "src/features/weather/weather.h"
 
 enum Page : uint8_t { PAGE_PET, PAGE_CLOCK, PAGE_WEATHER, PAGE_SETTINGS, PAGE_COUNT };
 enum class PetExpression : uint8_t { Blink, Love, Sparkle, Surprise, Wink, Bashful, Sleepy, Dizzy, Joy };

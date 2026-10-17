@@ -1,10 +1,10 @@
-#include "talk.h"
+#include "src/features/talk/talk.h"
 
 #include <Arduino.h>
 #include <atomic>
 #include <math.h>
-#include "audio.h"
-#include "log.h"
+#include "src/core/audio/audio.h"
+#include "src/core/system/log.h"
 
 namespace {
 constexpr uint32_t SAMPLE_RATE = 16000;

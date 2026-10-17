@@ -43,7 +43,7 @@ def main() -> None:
         ("FONT_VALUE", 45, "0123456789:.-", "segoeuil.ttf"),
     ]:
         source += font_asset(name, size, characters, filename)
-    (ROOT / "ui_assets.h").write_text(source, encoding="utf-8")
+    (ROOT / "src/features/ui/ui_assets.h").write_text(source, encoding="utf-8")
     print("UI assets generated")
 
 

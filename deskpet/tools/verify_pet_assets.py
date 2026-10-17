@@ -14,7 +14,7 @@ from PIL import Image
 ROOT = Path(__file__).resolve().parents[1]  # sketch root; this script lives in tools/
 SNAPSHOTS = ROOT / "qa" / "snapshots"
 Scalar = str | int | float | bool | None
-VERSION = re.search(r'VERSION\[\] = "([^"]+)"', (ROOT / "config.h").read_text()).group(1)
+VERSION = re.search(r'VERSION\[\] = "([^"]+)"', (ROOT / "src/core/system/config.h").read_text()).group(1)
 
 
 def main() -> None:
@@ -70,7 +70,12 @@ def main() -> None:
             send("page 0")
             send("hold 234 120")
             state = query("asset-status", "assets_ready")
-            assert state["picker_page"] == 0
+            for _ in range(len(manifest["assets"])):  # page arrows wrap, so this always reaches the page
+                if state["picker_page"] == index // 3:
+                    break
+                send("tap 285 48")
+                state = query("asset-status", "assets_ready")
+            assert state["picker_page"] == index // 3
             send(f"tap {60 + index % 3 * 100} 130")
             time.sleep(0.65)
             state = query("asset-status", "assets_ready")
@@ -79,7 +84,7 @@ def main() -> None:
         status = query("status", "firmware")
         assert status["firmware"] == VERSION
         initial = query("asset-status", "assets_ready")
-        assert initial["assets_ready"] is True and initial["asset_count"] == 3
+        assert initial["assets_ready"] is True and initial["asset_count"] == len(manifest["assets"])
         assert initial["asset_bytes"] == manifest["bytes"]
         settings = query("settings-status", "brightness")
         alarm = query("alarm-status", "alarm_hour")
@@ -97,7 +102,7 @@ def main() -> None:
                 break
             if time.monotonic() > deadline:
                 raise TimeoutError("Model self-test response missing")
-        for index in range(3):
+        for index in range(len(manifest["assets"])):
             sound_before = query("settings-status", "brightness")
             select(index)
             send("tap 234 120")
@@ -134,7 +139,9 @@ def main() -> None:
         snapshot("pet")
         query("ui-stats", "ui_frames")
         assert query("status", "firmware")["touch_errors"] == 0
-        print("PASS: 54 poses, 3 companions, silent pet selection and taps, settings retention", flush=True)
+        companions = len(manifest["assets"])
+        print(f"PASS: {companions * 18} poses, {companions} companions, silent pet selection and taps, settings retention",
+              flush=True)
 
 
 if __name__ == "__main__":

@@ -1,12 +1,13 @@
-#include "audio.h"
+#include "src/core/audio/audio.h"
 
 #include <Arduino.h>
 #include <Wire.h>
 #include <atomic>
 #include <math.h>
 #include <driver/i2s_std.h>
-#include "config.h"
-#include "log.h"
+#include "src/core/audio/ringtone_data.h"
+#include "src/core/system/config.h"
+#include "src/core/system/log.h"
 
 // ES8311 register configuration follows the 16 kHz / 256x MCLK mode documented in:
 // https://github.com/Freenove/Freenove_ESP32_S3_Display/tree/main/Tutorial_With_Touch/Sketches/Sketch_07.1_Music
@@ -18,8 +19,9 @@ constexpr uint8_t MIC_GAIN = 0x05;  // REG16: 6 dB per step, 0x05 = +30 dB for s
 
 struct AudioRequest {
   uint32_t generation;
-  const int16_t *samples;  // nullptr plays the chime
+  const int16_t *samples;  // mono 16 kHz
   uint32_t count;
+  bool loop;  // start again from the first sample until the request goes stale
 };
 
 i2s_chan_handle_t speakerChannel = nullptr;
@@ -35,14 +37,6 @@ std::atomic<bool> audioCancelled{false};
 std::atomic<bool> busy{false};
 // Every request carries a new generation so the worker drops anything older.
 std::atomic<uint32_t> audioGeneration{0};
-
-float chimeSample(uint32_t position) {
-  const bool second = position >= 3360;
-  const uint32_t local = second ? position - 3360 : position;
-  if (local >= 2400) return 0;
-  const float envelope = min(1.0F, min(local / 160.0F, (2400 - local) / 160.0F));
-  return sinf(local * (second ? 1174.66F : 880.0F) * 6.2831853F / 16000.0F) * envelope * 12000.0F;
-}
 
 bool codecWrite(uint8_t address, uint8_t value) {
   for (uint8_t attempt = 1; attempt <= 3; ++attempt) {
@@ -80,15 +74,17 @@ void finishRequest() {
 }
 
 // Streams one request in 256-frame blocks so a newer request can cut in quickly.
+// A looping request starts again from the first sample until it goes stale.
 bool playRequest(const AudioRequest &request, int16_t *samples, uint32_t &peak) {
-  const uint32_t frames = request.samples ? request.count : 28 * 256;
-  for (uint32_t position = 0; position < frames; position += 256) {
+  uint32_t index = 0;
+  for (;;) {
     if (requestStale(request)) return false;
+    if (!request.loop && index >= request.count) return true;
     const float volume = audioGain.load() / 100.0F;
     uint32_t blockPeak = 0;
     for (uint32_t frame = 0; frame < 256; ++frame) {
-      const uint32_t index = position + frame;
-      const float source = request.samples ? (index < frames ? request.samples[index] : 0) : chimeSample(index);
+      const float source = index < request.count ? request.samples[index] : 0;
+      if (++index == request.count && request.loop) index = 0;
       const int16_t value = static_cast<int16_t>(source * volume * volume);
       samples[frame * 2] = value; samples[frame * 2 + 1] = value;
       blockPeak = max(blockPeak, static_cast<uint32_t>(abs(static_cast<int>(value))));
@@ -97,7 +93,6 @@ bool playRequest(const AudioRequest &request, int16_t *samples, uint32_t &peak) 
     peak = max(peak, blockPeak);
     if (!writeAudioSamples(samples, 512)) return false;
   }
-  return true;
 }
 
 void audioWorker(void *) {
@@ -119,16 +114,16 @@ void audioWorker(void *) {
     if (complete) {
       audioPeak.store(peak);
       audioCompleted.fetch_add(1);
-      Serial.println(request.samples ? "{\"event\":\"recording_complete\"}" : "{\"event\":\"sound_complete\"}");
+      Serial.println(request.samples == RINGTONE_PCM ? "{\"event\":\"sound_complete\"}" : "{\"event\":\"recording_complete\"}");
     }
     finishRequest();
   }
 }
 
-void queueRequest(const int16_t *samples, uint32_t count) {
+void queueRequest(const int16_t *samples, uint32_t count, bool loop) {
   audioCancelled.store(false);
   busy.store(true);
-  const AudioRequest event{audioGeneration.fetch_add(1) + 1, samples, count};
+  const AudioRequest event{audioGeneration.fetch_add(1) + 1, samples, count, loop};
   if (xQueueOverwrite(audioRequests, &event) != pdTRUE) {
     busy.store(false);
     logError("audio", "Unable to queue sound");
@@ -193,15 +188,23 @@ void setAudioGain(uint8_t gain) {
   if (gain == 0) digitalWrite(PIN_SPEAKER_MUTE, HIGH);
 }
 
+// Plays the ringtone once. Used by the test buttons and the microphone test.
 void requestSound() {
   if (!audioReady.load()) { logError("audio", "Speaker is unavailable"); return; }
   if (audioGain.load() == 0) return;
-  queueRequest(nullptr, 0);
+  queueRequest(RINGTONE_PCM, RINGTONE_SAMPLES, false);
+}
+
+// Plays the ringtone again and again until cancelSound() or a newer request.
+void startRinging() {
+  if (!audioReady.load()) { logError("audio", "Speaker is unavailable"); return; }
+  if (audioGain.load() == 0) return;
+  queueRequest(RINGTONE_PCM, RINGTONE_SAMPLES, true);
 }
 
 void playRecording(const int16_t *samples, uint32_t count) {
   if (!audioReady.load() || audioGain.load() == 0 || !samples || count == 0) return;
-  queueRequest(samples, count);
+  queueRequest(samples, count, false);
 }
 
 void cancelSound() {

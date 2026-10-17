@@ -1,5 +1,5 @@
 #pragma once
-#include "config.h"
+#include "src/core/system/config.h"
 
 // Screen geometry shared by drawing (ui.cpp) and touch handling (app.cpp), so
 // a control and its touch target can never drift apart.
@@ -49,10 +49,10 @@ struct Slider {
   constexpr Rect track() const { return {65, centerY - 2, 190, 4}; }
   // Dragging works on the track plus a small gap towards each step button.
   constexpr Rect dragZone() const { return {track().x - 5, row().y, track().w + 11, row().h}; }
-  // Step buttons nudge by 10 points; touching the track jumps to that position.
+  // Step buttons snap to the next/prev multiple of 5; touching the track jumps to that position.
   constexpr int target(int x, int current) const {
-    return x < track().x - 5 ? current - 10
-         : x > track().right() + 5 ? current + 10
+    return x < track().x - 5 ? (current <= 0 ? 0 : (current - 1) / 5 * 5)
+         : x > track().right() + 5 ? (current >= 100 ? 100 : (current / 5 + 1) * 5)
          : (x - track().x) * 100 / track().w;
   }
   constexpr int clampToTrack(int x) const {

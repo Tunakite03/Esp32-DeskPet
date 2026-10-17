@@ -7,18 +7,18 @@
 #include <esp_task_wdt.h>
 #include <sys/time.h>
 #include <time.h>
-#include "audio.h"
-#include "config.h"
-#include "layout.h"
-#include "log.h"
-#include "model.h"
-#include "pet_assets.h"
-#include "state.h"
-#include "talk.h"
-#include "timekeeping.h"
-#include "touch_input.h"
-#include "ui.h"
-#include "weather.h"
+#include "src/core/audio/audio.h"
+#include "src/core/system/config.h"
+#include "src/features/ui/layout.h"
+#include "src/core/system/log.h"
+#include "src/app/model.h"
+#include "src/features/pet/pet_assets.h"
+#include "src/app/state.h"
+#include "src/features/talk/talk.h"
+#include "src/core/system/timekeeping.h"
+#include "src/core/input/touch_input.h"
+#include "src/features/ui/ui.h"
+#include "src/features/weather/weather.h"
 
 namespace {
 constexpr uint32_t WEATHER_INTERVAL = 15UL * 60000UL;
@@ -36,7 +36,7 @@ WebServer server(80);
 Preferences preferences;
 
 // Bookkeeping that only input handling and persistence need.
-uint32_t alarmStartedAt = 0, lastAlarmChime = 0, lastAlarmCheck = 0;
+uint32_t alarmStartedAt = 0, lastAlarmCheck = 0;
 bool deviceSettingsPending = false;
 uint32_t deviceSettingsChangedAt = 0;
 uint8_t petReactionIndex = 0, rapidPetTaps = 0;
@@ -52,10 +52,14 @@ bool inputPending = false;
 // Worst-case timings since the last "perf" command, to find what makes input feel slow.
 struct Perf {
   uint32_t loops = 0, renders = 0;
-  uint32_t maxLoopUs = 0, maxRenderUs = 0, maxSaveUs = 0, maxInputLatencyMs = 0;
+  uint32_t maxLoopUs = 0, maxRenderUs = 0, maxPumpUs = 0, maxSaveUs = 0, maxInputLatencyMs = 0;
   uint64_t totalRenderUs = 0;
 };
 Perf perf;
+// Frames or input handling slower than this print a "slow_frame" event with its breakdown.
+constexpr uint32_t SLOW_FRAME_US = 40000;
+// Tile rows the display may send in one pass of the main loop.
+constexpr uint32_t DISPLAY_SLICE_US = 6000;
 
 bool petPageInteractive() {
   return !state.alarmRinging && !state.setup.open && state.page == PAGE_PET && !state.pet.pickerOpen;
@@ -297,10 +301,10 @@ void printSettingsStatus() {
 
 void startAlarm(uint32_t now) {
   state.alarmRinging = true;
-  alarmStartedAt = now; lastAlarmChime = now;
+  alarmStartedAt = now;
   state.lastInteraction = now;
   state.pet.pickerOpen = false;
-  requestSound();
+  startRinging();
   Serial.println("{\"event\":\"alarm_ringing\"}");
 }
 
@@ -312,10 +316,7 @@ void stopAlarm(uint32_t now) {
 }
 
 void updateAlarm(uint32_t now) {
-  if (state.alarmRinging) {
-    if (!alarmWithinRingWindow(alarmStartedAt, now)) stopAlarm(now);
-    else if (now - lastAlarmChime >= 2000) { lastAlarmChime = now; requestSound(); }
-  }
+  if (state.alarmRinging && !alarmWithinRingWindow(alarmStartedAt, now)) stopAlarm(now);
   if (now - lastAlarmCheck < 250 || !clockReady() || deviceSettingsPending) return;
   lastAlarmCheck = now;
   const time_t epoch = time(nullptr);
@@ -590,10 +591,11 @@ void runSerialCommand() {
   else if (serialLine == "ui-stats") printUiStats();
   else if (serialLine == "perf") {
     Serial.printf("{\"perf\":true,\"loops\":%lu,\"renders\":%lu,\"avg_render_us\":%lu,\"max_render_us\":%lu,"
-                  "\"max_loop_us\":%lu,\"max_save_us\":%lu,\"max_input_latency_ms\":%lu,\"free_heap\":%u}\n",
+                  "\"max_loop_us\":%lu,\"max_pump_us\":%lu,\"max_save_us\":%lu,\"max_input_latency_ms\":%lu,\"free_heap\":%u}\n",
                   static_cast<unsigned long>(perf.loops), static_cast<unsigned long>(perf.renders),
                   static_cast<unsigned long>(perf.renders ? perf.totalRenderUs / perf.renders : 0),
                   static_cast<unsigned long>(perf.maxRenderUs), static_cast<unsigned long>(perf.maxLoopUs),
+                  static_cast<unsigned long>(perf.maxPumpUs),
                   static_cast<unsigned long>(perf.maxSaveUs), static_cast<unsigned long>(perf.maxInputLatencyMs),
                   ESP.getFreeHeap());
     perf = Perf{};
@@ -845,7 +847,21 @@ void appLoop() {
     perf.totalRenderUs += renderUs;
     ++perf.renders;
     lastFrame = now;
+    const uint32_t beforeRender = renderStarted - loopStarted;
+    if (renderUs > SLOW_FRAME_US || beforeRender > SLOW_FRAME_US) {
+      const RenderTiming timing = lastRenderTiming();
+      Serial.printf("{\"event\":\"slow_frame\",\"before_render_us\":%lu,\"render_us\":%lu,\"drawn\":%s,"
+                    "\"draw_us\":%lu,\"decode_us\":%lu,"
+                    "\"page\":%u,\"picker\":%s,\"ringing\":%s}\n",
+                    static_cast<unsigned long>(beforeRender), static_cast<unsigned long>(renderUs),
+                    timing.drawn ? "true" : "false", static_cast<unsigned long>(timing.drawUs),
+                    static_cast<unsigned long>(timing.decodeUs),
+                    state.page, state.pet.pickerOpen ? "true" : "false", state.alarmRinging ? "true" : "false");
+    }
   }
+  const uint32_t pumpStarted = micros();
+  pumpDisplay(DISPLAY_SLICE_US);
+  perf.maxPumpUs = max(perf.maxPumpUs, micros() - pumpStarted);
   ++perf.loops;
   perf.maxLoopUs = max(perf.maxLoopUs, micros() - loopStarted);
   delay(2);

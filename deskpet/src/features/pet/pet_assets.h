@@ -27,5 +27,7 @@ const PetAsset &petAsset(uint8_t index);
 // Decodes every frame and prints a CRC over the pixels (serial "asset-selftest").
 void testPetAssets();
 uint32_t animationFrameAt(const PetAsset &asset, uint32_t elapsed);
+// Microseconds spent decoding companion frames since the last call.
+uint32_t takePetDecodeMicros();
 // Draws a frame scaled (nearest neighbour) into a SCREEN_WIDTH x SCREEN_HEIGHT framebuffer.
 void drawPetAsset(uint16_t *framebuffer, uint8_t index, uint32_t frame, int x, int y, int width, int height);

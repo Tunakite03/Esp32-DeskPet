@@ -1,7 +1,7 @@
 {
-  "bytes": 804783,
-  "crc32": 3678217340,
-  "decoded_crc32": 756187992,
+  "bytes": 1089281,
+  "crc32": 1769809926,
+  "decoded_crc32": 4187573998,
   "assets": [
     {
       "name": "Cat",
@@ -18,11 +18,18 @@
       "bytes": 245170
     },
     {
-      "name": "Fox",
+      "name": "Dino",
       "side": 144,
       "frames": 18,
       "duration_ms": 0,
-      "bytes": 305544
+      "bytes": 345204
+    },
+    {
+      "name": "Frog",
+      "side": 144,
+      "frames": 18,
+      "duration_ms": 0,
+      "bytes": 244582
     }
   ]
 }

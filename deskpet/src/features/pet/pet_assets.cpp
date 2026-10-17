@@ -1,10 +1,10 @@
-#include "pet_assets.h"
+#include "src/features/pet/pet_assets.h"
 
 #include <Arduino.h>
 #include <esp_partition.h>
 #include <esp_rom_crc.h>
-#include "config.h"
-#include "log.h"
+#include "src/core/system/config.h"
+#include "src/core/system/log.h"
 
 namespace {
 constexpr uint8_t MAX_PET_ASSETS = 16;
@@ -19,6 +19,7 @@ bool ready = false;
 esp_partition_mmap_handle_t assetMapping = 0;
 int cachedAsset = -1;
 uint32_t cachedFrame = UINT32_MAX;
+uint32_t decodeMicros = 0;
 
 uint16_t assetWord(const uint8_t *data) { return data[0] | (static_cast<uint16_t>(data[1]) << 8); }
 uint32_t assetDword(const uint8_t *data) {
@@ -60,6 +61,7 @@ bool validEntry(const PetAsset &asset) {
 bool decodeFrame(uint8_t index, uint32_t frame) {
   if (!ready || index >= assetCount || frame >= assets[index].frames) return false;
   if (cachedAsset == index && cachedFrame == frame) return true;
+  const uint32_t decodeStarted = micros();
   const PetAsset &asset = assets[index];
   const uint8_t *record = assetData + asset.table + frame * FRAME_RECORD_BYTES;
   const uint8_t *cursor = assetData + assetDword(record);
@@ -102,10 +104,17 @@ bool decodeFrame(uint8_t index, uint32_t frame) {
     }
   }
   if (written != expected) return assetFailure("Decoded frame is incomplete");
+  decodeMicros += micros() - decodeStarted;
   cachedAsset = index; cachedFrame = frame;
   return true;
 }
 }  // namespace
+
+uint32_t takePetDecodeMicros() {
+  const uint32_t value = decodeMicros;
+  decodeMicros = 0;
+  return value;
+}
 
 bool initPetAssets() {
   const esp_partition_t *partition = esp_partition_find_first(
