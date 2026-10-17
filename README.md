@@ -20,6 +20,9 @@ it hears in a higher voice.
 - **Talk mode** (switched on in Settings): the microphone is only read while
   talk mode is on and the pet page is showing. Recordings stay in RAM, get overwritten by the next phrase,
   and are never stored or sent anywhere.
+- **Customizer**: a web page (`web/`) that adds, removes, renames and reorders
+  companions, swaps the alarm ringtone, and flashes the result from the browser.
+  See [Customize companions and ringtone](#customize-companions-and-ringtone).
 - **Smooth UI**: only the 16×16 tiles that changed are sent to the panel, and
   touch input is handled before drawing. On the board the UI renders at
   20–21 frames per second with a worst-case render of 14 ms.
@@ -37,6 +40,7 @@ it hears in a higher voice.
 Esp32-DeskPet/
 ├── deskpet/     Arduino sketch: firmware sources, asset pack, host tools, QA data
 │                (see deskpet/README.md for the full source layout)
+├── web/         Customizer page: edits pets.bin and flashes it over Web Serial
 └── firmware/    A prebuilt full-flash image (merged-binary.bin) in a zip
 ```
 
@@ -198,6 +202,47 @@ connected to Wi-Fi. You can also open it at any time by holding BOOT for about
 password. Join that network, open `http://192.168.4.1`, then choose your Wi-Fi
 and weather location.
 
+## Customize companions and ringtone
+
+`web/index.html` edits the asset pack and writes it to the `assets` partition
+(`0x610000`) only, so Wi-Fi, the alarm and other settings stay as they are.
+It needs Chrome or Edge on a computer (Web Serial). Serve the repository root
+over HTTP so the page can load the default pack, then open the page:
+
+```bash
+python3 -m http.server 8000
+```
+
+Open <http://localhost:8000/web/>. With GitHub Pages enabled for the
+repository, the same page works at `https://<user>.github.io/Esp32-DeskPet/web/`.
+
+- **Companions**: rename, reorder or remove them (3 to 16 in a pack). The
+  easiest way to add one is the [page-mascot gallery](https://koboyo.com/page-mascot):
+  press *Use* on a character, download its `<name>-directions.webp` and
+  `<name>-reactions.webp`, and choose both files in the customizer (the name is
+  filled in from the file name). Your own two 3×3 sprite sheets on a
+  transparent background work the same way (9 gaze directions, then the 9
+  reactions, in the order the page lists; see `deskpet/assets/page-mascot/cat-*.webp`).
+  A GIF, animated WebP or APNG also works and loops at 64×64 pixels.
+- **Ringtone**: pick an audio file and the part to keep (up to 30 seconds). It
+  is converted to 16 kHz mono. Without one, the ringtone compiled into the
+  firmware plays.
+- **Flash to DeskPet**: asks the running firmware for its version, checks the
+  partition table, writes the pack, restarts the board and reads
+  `asset-status` back to confirm the companions (and ringtone) loaded.
+  **Download pets.bin** saves the file to flash yourself at `0x610000`.
+
+A pack with a custom ringtone is format version 2, which firmware 1.9.0 and
+newer reads. Older firmware rejects it and shows no companions, so the page
+refuses to flash it to a board that reports an older version. A pack without a
+ringtone stays version 1 and works with every release.
+
+Tests for the pack encoder (they rebuild `deskpet/assets/pets.bin` byte for byte):
+
+```bash
+node --test web/
+```
+
 ## Using the device
 
 | Input | Action |
@@ -220,7 +265,7 @@ which the QA scripts parse.
 |---|---|
 | `status` | Firmware version, uptime, heap, Wi-Fi, clock and weather state |
 | `perf` | Worst-case loop, render and save timings since the last `perf` |
-| `ui-stats`, `settings-status`, `alarm-status`, `pet-status`, `asset-status`, `talk-status` | State of each subsystem |
+| `ui-stats`, `settings-status`, `alarm-status`, `pet-status`, `asset-status`, `talk-status` | State of each subsystem (`asset-status` includes `ringtone_samples`, 0 for the built-in ringtone) |
 | `selftest`, `asset-selftest`, `sound-test`, `mic-test` | On-device checks |
 | `page <n>`, `tap <x> <y>`, `hold <x> <y>`, `pet`, `setup` | Drive the UI from a script |
 | `snapshot` | Dump the framebuffer (used by `tools/verify_pet_assets.py`) |
@@ -234,7 +279,7 @@ The scripts in `deskpet/tools/` need Python 3 with `pyserial`, `Pillow` and
 | Script | Purpose |
 |---|---|
 | `build_pet_assets.py` | Rebuild `assets/pets.bin` from the sprite sheets in `assets/page-mascot/` |
-| `build_ringtone.py` | Convert an audio file into the alarm ringtone (`src/core/audio/ringtone_data.h`) |
+| `build_ringtone.py` | Convert an audio file into the built-in alarm ringtone (`src/core/audio/ringtone_data.h`); the customizer can override it without a rebuild |
 | `generate_ui_assets.py` | Regenerate the anti-aliased fonts in `ui_assets.h` (reads Segoe UI from `C:/Windows/Fonts`, so Windows only) |
 | `verify_pet_assets.py` | Check the asset pack and UI on a connected board, writing PNG snapshots to `qa/snapshots/` |
 | `perf_probe.py`, `jank_monitor.py` | Measure UI responsiveness and catch stalls |

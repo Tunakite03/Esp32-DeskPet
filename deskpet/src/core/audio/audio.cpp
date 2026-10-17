@@ -37,6 +37,9 @@ std::atomic<bool> audioCancelled{false};
 std::atomic<bool> busy{false};
 // Every request carries a new generation so the worker drops anything older.
 std::atomic<uint32_t> audioGeneration{0};
+// Set once at boot, before any request reaches the worker.
+const int16_t *ringtoneSamples = RINGTONE_PCM;
+uint32_t ringtoneCount = RINGTONE_SAMPLES;
 
 bool codecWrite(uint8_t address, uint8_t value) {
   for (uint8_t attempt = 1; attempt <= 3; ++attempt) {
@@ -114,7 +117,7 @@ void audioWorker(void *) {
     if (complete) {
       audioPeak.store(peak);
       audioCompleted.fetch_add(1);
-      Serial.println(request.samples == RINGTONE_PCM ? "{\"event\":\"sound_complete\"}" : "{\"event\":\"recording_complete\"}");
+      Serial.println(request.samples == ringtoneSamples ? "{\"event\":\"sound_complete\"}" : "{\"event\":\"recording_complete\"}");
     }
     finishRequest();
   }
@@ -188,18 +191,24 @@ void setAudioGain(uint8_t gain) {
   if (gain == 0) digitalWrite(PIN_SPEAKER_MUTE, HIGH);
 }
 
+void setRingtone(const int16_t *samples, uint32_t count) {
+  if (!samples || count == 0) { logError("audio", "Ignored an empty ringtone"); return; }
+  ringtoneSamples = samples;
+  ringtoneCount = count;
+}
+
 // Plays the ringtone once. Used by the test buttons and the microphone test.
 void requestSound() {
   if (!audioReady.load()) { logError("audio", "Speaker is unavailable"); return; }
   if (audioGain.load() == 0) return;
-  queueRequest(RINGTONE_PCM, RINGTONE_SAMPLES, false);
+  queueRequest(ringtoneSamples, ringtoneCount, false);
 }
 
 // Plays the ringtone again and again until cancelSound() or a newer request.
 void startRinging() {
   if (!audioReady.load()) { logError("audio", "Speaker is unavailable"); return; }
   if (audioGain.load() == 0) return;
-  queueRequest(RINGTONE_PCM, RINGTONE_SAMPLES, true);
+  queueRequest(ringtoneSamples, ringtoneCount, true);
 }
 
 void playRecording(const int16_t *samples, uint32_t count) {

@@ -18,8 +18,17 @@ struct PetAsset {
   uint32_t frames = 0, table = 0, duration = 0;
 };
 
+// Alarm ringtone carried by a version 2 pack: mono 16 kHz PCM, memory-mapped
+// from flash. `count` is 0 when the pack has none.
+struct AssetRingtone {
+  const int16_t *samples = nullptr;
+  uint32_t count = 0;
+};
+constexpr uint32_t MAX_ASSET_RINGTONE_SAMPLES = 16000UL * 30;
+
 // Maps and validates the asset partition. Safe to call once at boot.
 bool initPetAssets();
+AssetRingtone assetRingtone();
 bool petAssetsReady();
 uint8_t petAssetCount();
 uint32_t petAssetBytes();

@@ -8,7 +8,10 @@
 
 namespace {
 constexpr uint8_t MAX_PET_ASSETS = 16;
-constexpr uint32_t HEADER_BYTES = 24, ENTRY_BYTES = 40, FRAME_RECORD_BYTES = 12;
+// Version 1: 24-byte header, then the directory. Version 2 adds 8 bytes
+// (ringtone offset, sample count) before the directory. The CRC always covers
+// everything after the first 24 bytes.
+constexpr uint32_t HEADER_BYTES = 24, HEADER_V2_BYTES = 32, ENTRY_BYTES = 40, FRAME_RECORD_BYTES = 12;
 
 PetAsset assets[MAX_PET_ASSETS];
 uint8_t assetCount = 0;
@@ -17,6 +20,7 @@ uint32_t assetBytes = 0;
 uint16_t *framePixels = nullptr;
 bool ready = false;
 esp_partition_mmap_handle_t assetMapping = 0;
+AssetRingtone ringtone;
 int cachedAsset = -1;
 uint32_t cachedFrame = UINT32_MAX;
 uint32_t decodeMicros = 0;
@@ -124,10 +128,12 @@ bool initPetAssets() {
     return assetFailure("Asset partition could not be read");
   }
   assetBytes = assetDword(header + 12);
+  const uint32_t version = assetDword(header + 8);
   const uint32_t count = assetDword(header + 20);
-  if (memcmp(header, "DPETAS01", 8) != 0 || assetDword(header + 8) != 1 || assetBytes < HEADER_BYTES ||
+  const uint32_t directory = version == 2 ? HEADER_V2_BYTES : HEADER_BYTES;
+  if (memcmp(header, "DPETAS01", 8) != 0 || (version != 1 && version != 2) || assetBytes < directory ||
       assetBytes > partition->size || count < 3 || count > MAX_PET_ASSETS ||
-      HEADER_BYTES + count * ENTRY_BYTES > assetBytes) {
+      directory + count * ENTRY_BYTES > assetBytes) {
     return assetFailure("Invalid asset pack header or capacity");
   }
   const void *mapped = nullptr;
@@ -138,9 +144,19 @@ bool initPetAssets() {
   if (esp_rom_crc32_le(0, assetData + HEADER_BYTES, assetBytes - HEADER_BYTES) != assetDword(header + 16)) {
     return assetFailure("Asset pack CRC mismatch");
   }
+  if (version == 2) {
+    const uint32_t offset = assetDword(assetData + HEADER_BYTES);
+    const uint32_t samples = assetDword(assetData + HEADER_BYTES + 4);
+    const bool none = offset == 0 && samples == 0;
+    if (!none && (offset % 2 != 0 || offset < directory + count * ENTRY_BYTES || offset > assetBytes || samples == 0 ||
+                  samples > MAX_ASSET_RINGTONE_SAMPLES || samples * 2 > assetBytes - offset)) {
+      return assetFailure("Invalid ringtone bounds");
+    }
+    if (!none) ringtone = {reinterpret_cast<const int16_t *>(assetData + offset), samples};
+  }
   assetCount = count;
   for (uint8_t index = 0; index < assetCount; ++index) {
-    const uint8_t *entry = assetData + HEADER_BYTES + index * ENTRY_BYTES;
+    const uint8_t *entry = assetData + directory + index * ENTRY_BYTES;
     PetAsset &asset = assets[index];
     memcpy(asset.name, entry, 24);
     asset.kind = assetWord(entry + 24);
@@ -153,12 +169,14 @@ bool initPetAssets() {
   framePixels = static_cast<uint16_t *>(ps_malloc(144 * 144 * sizeof(uint16_t)));
   if (!framePixels) return assetFailure("Animation frame allocation failed");
   ready = true;
-  Serial.printf("{\"event\":\"pet_assets_ready\",\"count\":%u,\"bytes\":%lu}\n",
-                assetCount, static_cast<unsigned long>(assetBytes));
+  Serial.printf("{\"event\":\"pet_assets_ready\",\"count\":%u,\"bytes\":%lu,\"ringtone_samples\":%lu}\n",
+                assetCount, static_cast<unsigned long>(assetBytes), static_cast<unsigned long>(ringtone.count));
   return true;
 }
 
 bool petAssetsReady() { return ready; }
+// A pack that failed validation offers no ringtone either.
+AssetRingtone assetRingtone() { return ready ? ringtone : AssetRingtone{}; }
 uint8_t petAssetCount() { return assetCount; }
 uint32_t petAssetBytes() { return assetBytes; }
 const PetAsset &petAsset(uint8_t index) { return assets[index < MAX_PET_ASSETS ? index : 0]; }
