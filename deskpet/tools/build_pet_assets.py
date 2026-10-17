@@ -104,8 +104,9 @@ def mascot_frames(name: str) -> list[tuple[list[int], int]]:
 
 def main() -> None:
     groups: list[tuple[str, int, int, list[tuple[list[int], int]]]] = []
-    for species in ("cat", "bunny", "dino", "frog"):
-        groups.append((species.title(), 0, 144, mascot_frames(species)))
+    # Sprite sheet name → name shown on the board (at most 12 characters).
+    for species, title in (("cat", "Cat"), ("bunny", "Bunny"), ("dino", "DinoVip"), ("frog", "Frog")):
+        groups.append((title, 0, 144, mascot_frames(species)))
     index_size = HEADER.size + len(groups) * ENTRY.size + sum(len(frames) for _, _, _, frames in groups) * FRAME.size
     payload = bytearray()
     directory = bytearray()

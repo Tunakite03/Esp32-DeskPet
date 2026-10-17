@@ -1,6 +1,6 @@
 {
   "bytes": 1089281,
-  "crc32": 1769809926,
+  "crc32": 1255041824,
   "decoded_crc32": 4187573998,
   "assets": [
     {
@@ -18,7 +18,7 @@
       "bytes": 245170
     },
     {
-      "name": "Dino",
+      "name": "DinoVip",
       "side": 144,
       "frames": 18,
       "duration_ms": 0,
