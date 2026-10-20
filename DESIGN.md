@@ -197,14 +197,17 @@ The pet falls asleep after 25 s without interaction.
 
 ### Talk mode
 
-- 16 kHz microphone blocks of 20 ms. The noise floor adapts; a phrase starts
-  after 60 ms above it and ends after 700 ms of quiet. 250 ms of pre-roll is
-  kept so the first syllable is not lost.
+- 16 kHz microphone blocks of 20 ms, high-passed at 100 Hz (second order) so
+  wind rumble neither starts a phrase nor gets repeated. The noise floor adapts;
+  a phrase starts after 60 ms above it and ends after 1.2 s of quiet. 250 ms of
+  pre-roll is kept so the first syllable is not lost.
 - Phrases shorter than 12 voiced blocks (claps, desk bumps) are ignored, as
   is anything within 400 ms after playback (the speaker's own echo).
 - Pitch shift: Hann-windowed grains of 1024 samples every 512 samples, each
   read 1.6 times faster, so the pitch rises without changing the length.
-  Gain is normalised (at most ×8). Phrases are capped at 6 s.
+  Quiet phrases are lifted towards the alarm's average loudness (RMS 3000), at
+  most ×16. Loud phrases keep the older gain (peak 20000, at most ×8), so none gets
+  quieter. No sample passes 22000, the alarm's own peak. Phrases are capped at 6 s.
 - Buffers (recording, voice, mix) are allocated once in PSRAM.
 
 ### Setup portal

@@ -5,6 +5,7 @@
 #include <math.h>
 #include "src/core/audio/audio.h"
 #include "src/core/system/log.h"
+#include "src/features/talk/voice_dsp.h"
 
 namespace {
 constexpr uint32_t SAMPLE_RATE = 16000;
@@ -12,12 +13,23 @@ constexpr size_t BLOCK = 320;                    // 20 ms of audio
 constexpr size_t MAX_SAMPLES = SAMPLE_RATE * 6;  // longest phrase that is repeated
 constexpr size_t PREROLL = SAMPLE_RATE / 4;      // kept from just before speech was detected
 constexpr uint8_t START_BLOCKS = 3;              // 60 ms above the threshold starts a phrase
-constexpr uint8_t END_BLOCKS = 35;               // 700 ms of quiet ends it
+constexpr uint8_t END_BLOCKS = 60;               // 1.2 s of quiet ends it
 constexpr uint8_t TRAILING_BLOCKS = 8;           // quiet kept at the end of a phrase
 constexpr uint16_t MIN_VOICED_BLOCKS = 12;       // claps and desk bumps are ignored
 constexpr uint32_t COOLDOWN = 400;               // ignore the speaker's own echo
 constexpr float PITCH_RATIO = 1.6F;
 constexpr size_t GRAIN = 1024, HOP = GRAIN / 2;
+// Quiet phrases are lifted towards the alarm's average loudness (the built-in ringtone is RMS about 3062).
+constexpr float VOICE_RMS = 3000.0F;
+// No sample is raised above the alarm's own peak (about 22060).
+constexpr float VOICE_PEAK = 22000.0F;
+// Quiet speech is lifted, but noise is not boosted endlessly.
+constexpr float MAX_VOICE_GAIN = 16.0F;
+// The earlier rule, kept as a floor so that no phrase ends up quieter than before.
+constexpr float FLOOR_PEAK = 20000.0F;
+constexpr float FLOOR_MAX_GAIN = 8.0F;
+// Wind rumble is removed from the microphone before detection and recording.
+constexpr float MIC_HIGH_PASS_HZ = 100.0F;
 
 int16_t *recording = nullptr;
 int16_t *voice = nullptr;
@@ -25,6 +37,8 @@ float *mix = nullptr;
 float window[GRAIN];
 int16_t preroll[PREROLL];
 size_t prerollHead = 0;
+Biquad micHighPass{};
+BiquadState micHighPassState{};
 
 std::atomic<bool> active{false};
 std::atomic<bool> testRunning{false};
@@ -77,10 +91,8 @@ void makeVoice(size_t count) {
       mix[start + j] += sample * window[j];
     }
   }
-  float peak = 1;
-  for (size_t i = 0; i < count; ++i) peak = max(peak, fabsf(mix[i]));
-  // Quiet speech is brought up to a comfortable level, but noise is not boosted endlessly.
-  const float gain = min(8.0F, 20000.0F / peak);
+  // Quiet phrases are lifted to the alarm's loudness; loud ones keep the old gain, so none gets quieter.
+  const float gain = voiceGain(mix, count, {VOICE_RMS, VOICE_PEAK, MAX_VOICE_GAIN, FLOOR_PEAK, FLOOR_MAX_GAIN});
   for (size_t i = 0; i < count; ++i) voice[i] = static_cast<int16_t>(mix[i] * gain);
 }
 
@@ -100,6 +112,7 @@ void talkWorker(void *) {
     if (!active.load() || testRunning.load()) {
       if (!active.load()) { setPhase(TalkPhase::Off); level.store(0); }
       hearing = false; speaking = false; loudBlocks = 0;
+      micHighPassState = BiquadState{};
       vTaskDelay(pdMS_TO_TICKS(50));
       continue;
     }
@@ -109,12 +122,14 @@ void talkWorker(void *) {
       level.store(speaking ? min<uint32_t>(3, audioPlaybackPeak() / 5000) : 0);
       setPhase(speaking ? TalkPhase::Talking : TalkPhase::Listening);
       hearing = false; loudBlocks = 0;
+      micHighPassState = BiquadState{};
       cooldownUntil = millis() + COOLDOWN;
       continue;
     }
     speaking = false;
     // A failed read can return at once; sleep so this task never spins on core 0.
     if (readMicrophone(block, BLOCK, 100) != BLOCK) { vTaskDelay(pdMS_TO_TICKS(20)); continue; }
+    filterBlock(micHighPass, micHighPassState, block, BLOCK);
     if (static_cast<int32_t>(millis() - cooldownUntil) < 0) { setPhase(TalkPhase::Listening); continue; }
     const uint32_t rms = blockRms(block, BLOCK);
     const float startThreshold = max(noiseFloor * START_ABOVE_FLOOR, static_cast<float>(minStartRms.load()));
@@ -180,6 +195,7 @@ bool initTalk() {
   mix = static_cast<float *>(ps_malloc(MAX_SAMPLES * sizeof(float)));
   if (!recording || !voice || !mix) { logError("talk", "Recording buffer allocation failed"); return false; }
   for (size_t i = 0; i < GRAIN; ++i) window[i] = 0.5F - 0.5F * cosf(6.2831853F * i / GRAIN);
+  micHighPass = highPassCoefficients(static_cast<float>(SAMPLE_RATE), MIC_HIGH_PASS_HZ);
   if (xTaskCreatePinnedToCore(talkWorker, "talk", 6144, nullptr, 1, nullptr, 0) != pdPASS) {
     logError("talk", "Talk worker allocation failed");
     return false;
