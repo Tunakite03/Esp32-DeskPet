@@ -23,7 +23,7 @@ void settingSlider(const Slider &slider, int percent, uint16_t accent) {
 void drawSettings(const AppState &state) {
   const DeviceSettings &device = state.device;
   const String title = "DEVICE SETTINGS";
-  header(title.c_str());
+  header(title.c_str(), state.battery);
   // Firmware version as an outlined badge in the free space of the header, after the title.
   const String version = String("v") + VERSION_NUMBER;
   const int versionX = 16 + textWidth(title, FONT_SMALL) + 14;

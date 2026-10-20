@@ -49,7 +49,7 @@ void drawWeather(const AppState &state, uint32_t now) {
   const WeatherState &weather = state.weather;
   const WeatherResult &current = weather.current;
   const bool online = WiFi.status() == WL_CONNECTED;
-  header("A LOOK OUTSIDE");
+  header("A LOOK OUTSIDE", state.battery);
   uiText(18, 39, PLACES[weather.place].name, FONT_TITLE, COLOR_TEXT);
   if (weather.valid) {
     const String temperature = String(current.temperature, 1);

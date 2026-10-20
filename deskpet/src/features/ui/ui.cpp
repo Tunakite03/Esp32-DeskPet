@@ -173,7 +173,7 @@ void renderFrame(const AppState &state, uint32_t now) {
     state.alarm.hour, state.alarm.minute, state.alarm.enabled, state.alarmRinging,
     weather.current.fetchedAt, static_cast<uint32_t>(weather.current.error), weather.busy, weather.valid,
     (now - weather.current.fetchedAt) / 60000,
-    pet.tapCount, pet.reacting, sleeping, animation, state.uiRevision,
+    pet.tapCount, pet.reacting, sleeping, animation, state.uiRevision, state.battery.present, state.battery.percent, state.battery.charging,
     device.brightness, device.volume, device.muted, audioIsReady(),
     pet.mascot, pet.pickerOpen, pet.pickerPage, petAssetsReady(), static_cast<uint8_t>(pet.expression),
     device.talk, micReady(), static_cast<uint8_t>(talkPhase()), talkLevel(), petVisible ? listenWaves(now) : 0u,

@@ -22,6 +22,7 @@ Hardware (ES3C28P board):
 | Display | 2.8" 320×240 ILI9341 over SPI at 40 MHz (DC 46, CS 10, SCK 12, MOSI 11, MISO 13), PWM backlight on GPIO 45 |
 | Touch | FT6336 at I2C 0x38 (SDA 16, SCL 15, reset 18) |
 | Audio | ES8311 codec at I2C 0x18, full-duplex I2S (MCLK 4, BCLK 5, WS 7, DOUT 8, DIN 6), amplifier mute on GPIO 1 |
+| Battery | 3.7 V Li-Po through a 1:2 divider (two 200 kΩ) on ADC1 GPIO 9, sampled every 30 s; the header shows the level as a percentage, with a bolt while charging. Charge state: TP4054 CHRG (open drain, low while charging) on GPIO 21 with the internal pull-up, so an unwired pin reads as not charging. Limit: the TP4054 holds BAT+ near 4.2 V while USB is connected, so the percentage reads near full with or without a pack, and runs above the real level while charging |
 | Other | BOOT button (GPIO 0), RGB status LED (GPIO 42) |
 
 ## 2. Architecture

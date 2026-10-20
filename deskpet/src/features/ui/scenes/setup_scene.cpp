@@ -4,7 +4,7 @@
 
 namespace ui {
 void drawConfig(const AppState &state) {
-  header("MAKE YOURSELF AT HOME");
+  header("MAKE YOURSELF AT HOME", state.battery);
   uiText(18, 39, "01  Connect your phone", FONT_BODY, COLOR_TEXT);
   uiText(18, 60, state.setup.apName, FONT_TITLE, COLOR_TEXT);
   uiText(18, 89, "PASSWORD", FONT_SMALL, COLOR_TEXT);

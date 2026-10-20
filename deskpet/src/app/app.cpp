@@ -5,6 +5,7 @@
 #include <esp_task_wdt.h>
 #include <time.h>
 #include "src/core/audio/audio.h"
+#include "src/core/power/battery.h"
 #include "src/core/system/config.h"
 #include "src/features/ui/layout.h"
 #include "src/core/system/log.h"
@@ -23,6 +24,8 @@
 namespace {
 constexpr uint32_t WEATHER_INTERVAL = 15UL * 60000UL;
 constexpr uint32_t WEATHER_RETRY_INTERVAL = 60000UL;
+// Battery voltage moves slowly; a sample every 30 s keeps the header current without extra redraws.
+constexpr uint32_t BATTERY_INTERVAL = 30000UL;
 // DHCP and DNS are often not ready the moment Wi-Fi reports a connection.
 constexpr uint32_t NETWORK_SETTLE = 3000;
 constexpr uint32_t REACTION_DURATION = 1100;
@@ -37,7 +40,7 @@ NetworkCredentials network;
 // Bookkeeping that only input handling and the main loop need.
 uint32_t alarmStartedAt = 0, lastAlarmCheck = 0;
 uint8_t petReactionIndex = 0, rapidPetTaps = 0;
-uint32_t lastPetTapAt = 0, lastFrame = 0, lastWeatherAttempt = 0;
+uint32_t lastPetTapAt = 0, lastFrame = 0, lastWeatherAttempt = 0, lastBatteryRead = 0;
 uint32_t buttonAt = 0, lastReconnect = 0;
 bool buttonHeld = false, buttonWasDown = false, everConnected = false;
 bool fatalError = false, setupOffered = false;
@@ -476,6 +479,9 @@ void appSetup() {
   }
   // Touch sampling starts after the codec setup, the only other user of the I2C bus.
   if (!startTouchInput()) { logError("touch", "Touch task allocation failed"); fatalError = true; return; }
+  initBattery();
+  state.battery = readBattery();
+  lastBatteryRead = millis();
   showBootProgress("Connecting", 75);
   if (!startWeatherWorker()) { logError("weather", "Worker allocation failed"); fatalError = true; return; }
   initSetupPortal(state, network, applySetupForm);
@@ -550,6 +556,11 @@ void appLoop() {
                     "\"reason\":\"Request failed after bounded retries\",\"error_code\":%u}\n",
                     static_cast<unsigned>(result.error));
     }
+  }
+
+  if (now - lastBatteryRead >= BATTERY_INTERVAL) {
+    state.battery = readBattery();
+    lastBatteryRead = now;
   }
 
   if (state.pet.reacting && now - state.pet.reactedAt > REACTION_DURATION) state.pet.reacting = false;

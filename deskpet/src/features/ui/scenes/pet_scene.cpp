@@ -22,7 +22,7 @@ bool talkAnimating(const AppState &state) {
 }
 
 void drawMascotPicker(const AppState &state) {
-  header("CHOOSE A COMPANION");
+  header("CHOOSE A COMPANION", state.battery);
   const uint8_t pages = (petAssetCount() + PICKER_SLOTS - 1) / PICKER_SLOTS;
   if (pages > 1) {
     // Page arrows over the PICKER_PREV / PICKER_NEXT touch zones, and the page number.
@@ -76,7 +76,7 @@ uint8_t petBounceStep(const AppState &state, uint32_t now) {
 
 void drawPet(const AppState &state, uint32_t now) {
   if (!petAssetsReady()) {
-    header("DESK COMPANION");
+    header("DESK COMPANION", state.battery);
     uiCentered(75, "Pet assets unavailable", FONT_TITLE, COLOR_TEXT);
     uiCentered(105, "Reload the companion asset pack", FONT_SMALL, COLOR_TEXT);
     return;
@@ -87,7 +87,7 @@ void drawPet(const AppState &state, uint32_t now) {
   const bool posed = asset.kind == PET_ASSET_POSES;
   const bool talking = talkAnimating(state);
   const bool sleeping = posed && !talking && now - state.lastInteraction > PET_SLEEP_AFTER && !pet.reacting;
-  header("DESK COMPANION");
+  header("DESK COMPANION", state.battery);
   uiText(15, 43, clockText(), FONT_TIME, COLOR_TEXT);
   uiText(18, 108, dateText("%a, %d %b"), FONT_BODY, COLOR_TEXT);
   canvas.drawFastHLine(18, 133, 124, COLOR_SURFACE);

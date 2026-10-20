@@ -18,6 +18,7 @@ deskpet/
 │   ├── core/            Hardware and platform services; no screens or pet logic
 │   │   ├── audio/       audio.cpp, audio.h, ringtone_data.h (alarm ringtone PCM, generated)
 │   │   ├── input/       touch_input.cpp, touch_input.h
+│   │   ├── power/       battery.cpp, battery.h (battery voltage through the ADC)
 │   │   └── system/      config.h, log.h, timekeeping.h
 │   └── features/        User-facing features
 │       ├── pet/         Sprite pack decoder (pet_assets.*)

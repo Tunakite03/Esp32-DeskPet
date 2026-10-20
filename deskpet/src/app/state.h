@@ -1,6 +1,7 @@
 #pragma once
 #include <Arduino.h>
 #include "src/app/model.h"
+#include "src/core/power/battery.h"
 #include "src/features/pet/pet_assets.h"
 #include "src/features/weather/weather.h"
 
@@ -55,6 +56,7 @@ struct AppState {
   DeviceSettings device;
   PetState pet;
   WeatherState weather;
+  BatteryReading battery;
   AlarmSchedule alarm;
   bool alarmRinging = false;
   SetupPortalState setup;

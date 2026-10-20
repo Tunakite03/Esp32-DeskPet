@@ -117,6 +117,28 @@ void navIcon(int x, int y, uint8_t page, const Rect &pill) {
     }
   }
 }
+// Lightning bolt, 6 px wide and 11 px tall, shown while a pack charges over USB.
+void chargingBolt(int x, int y, uint16_t color) {
+  canvas.fillTriangle(x + 4, y, x, y + 6, x + 4, y + 6, color);
+  canvas.fillTriangle(x + 2, y + 5, x + 6, y + 5, x + 2, y + 11, color);
+}
+
+// Battery outline filled to the charge level, with the percentage to its left.
+// Sky blue while charging, peach at 20 % or less so a low cell stands out.
+void batteryBadge(int right, const BatteryReading &battery) {
+  constexpr int BODY_WIDTH = 22, BODY_HEIGHT = 11, NUB_WIDTH = 2, GAP = 4, TOP = 12, INSET = 3, BOLT_GAP = 3;
+  constexpr int BOLT_WIDTH = 6;
+  const int bodyLeft = right - BODY_WIDTH - NUB_WIDTH;
+  const String percent = String(battery.percent) + "%";
+  const int textLeft = bodyLeft - GAP - textWidth(percent, FONT_SMALL);
+  uiText(textLeft, 11, percent, FONT_SMALL, COLOR_TEXT);
+  if (battery.charging) chargingBolt(textLeft - BOLT_GAP - BOLT_WIDTH, 11, COLOR_SKY);
+  canvas.drawRoundRect(bodyLeft, TOP, BODY_WIDTH, BODY_HEIGHT, 2, COLOR_TEXT);
+  canvas.fillRect(bodyLeft + BODY_WIDTH, TOP + INSET, NUB_WIDTH, BODY_HEIGHT - 2 * INSET, COLOR_TEXT);
+  const int charged = (BODY_WIDTH - 2 * INSET) * battery.percent / 100;
+  const uint16_t fill = battery.charging ? COLOR_SKY : battery.percent <= 20 ? COLOR_PEACH : COLOR_TEXT;
+  if (charged > 0) canvas.fillRect(bodyLeft + INSET, TOP + INSET, charged, BODY_HEIGHT - 2 * INSET, fill);
+}
 }  // namespace
 
 int textWidth(const String &value, const UiFont &font) {
@@ -162,12 +184,13 @@ void uiRightAligned(int y, const String &value, const UiFont &font) {
   uiText(302 - textWidth(value, font), y, value, font, COLOR_TEXT);
 }
 
-void header(const char *title) {
+void header(const char *title, const BatteryReading &battery) {
   uiText(16, 11, title, FONT_SMALL, COLOR_TEXT);
   const String label = WiFi.status() == WL_CONNECTED ? "CONNECTED" : "OFFLINE";
   const int width = textWidth(label, FONT_SMALL);
   canvas.fillCircle(294 - width, 17, 2, COLOR_TEXT);
   uiText(302 - width, 11, label, FONT_SMALL, COLOR_TEXT);
+  if (battery.present) batteryBadge(286 - width, battery);
 }
 
 Rect navPill(uint8_t page) {

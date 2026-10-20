@@ -1,6 +1,7 @@
 #pragma once
 #include <Arduino.h>
 #include <Arduino_GFX_Library.h>
+#include "src/core/power/battery.h"
 #include "src/core/system/config.h"
 #include "src/features/ui/layout.h"
 #include "src/features/ui/ui_assets.h"
@@ -19,8 +20,8 @@ void uiText(int x, int y, const String &value, const UiFont &font, uint16_t colo
 void uiCentered(int y, const String &value, const UiFont &font, uint16_t color);
 void uiRightAligned(int y, const String &value, const UiFont &font);
 
-// Page title on the left, Wi-Fi status on the right.
-void header(const char *title);
+// Page title on the left; battery level and Wi-Fi status on the right.
+void header(const char *title, const BatteryReading &battery);
 // Highlight behind the active tab's icon and label, at rest on `page`.
 Rect navPill(uint8_t page);
 // Tab bar along the bottom. `pill` is where the highlight is now: navPill(page)

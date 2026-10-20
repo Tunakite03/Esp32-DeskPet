@@ -15,7 +15,7 @@ void alarmAdjustButton(const Rect &rect, const char *label) {
 void drawClock(const AppState &state) {
   const AlarmSchedule &alarm = state.alarm;
   const DeviceSettings &device = state.device;
-  header("CLOCK & ALARM");
+  header("CLOCK & ALARM", state.battery);
   uiCentered(31, clockText(), FONT_VALUE, COLOR_TEXT);
   uiCentered(80, dateText("%a, %d %b  /  UTC+7"), FONT_SMALL, COLOR_TEXT);
   canvas.drawFastHLine(18, 99, 284, COLOR_SURFACE);
@@ -43,7 +43,7 @@ void drawClock(const AppState &state) {
 
 void drawRingingAlarm(const AppState &state) {
   const DeviceSettings &device = state.device;
-  header("ALARM");
+  header("ALARM", state.battery);
   uiCentered(40, clockText(), FONT_TIME, COLOR_TEXT);
   uiCentered(110, "Time to wake up", FONT_TITLE, COLOR_TEXT);
   const char *detail = device.muted || device.volume == 0 ? "Speaker is muted"
