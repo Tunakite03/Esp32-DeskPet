@@ -2,7 +2,7 @@
 
 This document describes how DeskPet is built: the firmware on the ESP32-S3,
 the asset pack in flash, and the browser customizer that edits and flashes it.
-It reflects firmware 1.9.0. For setup and usage, see [README.md](README.md).
+It reflects firmware 1.10.0. For setup and usage, see [README.md](README.md).
 
 ## 1. Goals and constraints
 
@@ -399,6 +399,16 @@ NVS is never written, so Wi-Fi, the alarm and other settings survive.
   boot splash, the settings page and in `status`.
 - Releases ship `deskpet-vX.Y.Z-full.bin` (at `0x0`: bootloader, partitions,
   app and pets; resets NVS) and `deskpet-vX.Y.Z-app.bin` (at `0x10000`).
+
+### Release history
+
+| Version | Date | Changes |
+|---|---|---|
+| 1.10.0 | 2026-10-20 | Battery level in the header, with a charging bolt once TP4054 CHRG is wired to GPIO 21. Talk mode: 100 Hz high-pass, loudness-normalised phrases, phrases end after 1.2 s of quiet. Setup portal pauses reconnects while scanning. Setup access point has a default password, changeable with `ap-password`. Stock Dino companion renamed DinoVip. |
+| 1.9.0 | 2026-10-17 | Ringtone from the asset pack (format version 2). Browser customizer for companions and ringtone. Setup password and Wi-Fi scan fixes. |
+| 1.8.2 | 2026-10-17 | Tab highlight skips pixels it cannot cover, so the UI renders faster. |
+| 1.8.1 | 2026-10-17 | Sliding tab highlight. Firmware version on the settings page. Quick flash guide. |
+| 1.8.0 | 2026-10-17 | Chance of rain for the next six hours on the weather page. |
 
 ## 14. Limitations and next steps
 
