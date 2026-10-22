@@ -33,3 +33,16 @@ uint16_t audioPlaybackPeak();
 // Reads up to `frames` mono microphone samples; returns how many were read.
 size_t readMicrophone(int16_t *samples, size_t frames, uint32_t timeoutMs);
 AudioStats audioStats();
+
+// Buffered mono 16 kHz streaming. The decoder runs on its own worker; the
+// existing speaker worker remains the only task writing to I2S. Tokens prevent
+// stale music buffers from reaching a newer alarm or recording request.
+uint32_t beginAudioStream();
+bool queueAudioStream(uint32_t token, const int16_t *samples, uint16_t count);
+bool finishAudioStream(uint32_t token);
+void pauseAudioStream(uint32_t token);
+void resumeAudioStream(uint32_t token);
+void stopAudioStream(uint32_t token);
+bool audioStreamCurrent(uint32_t token);
+bool audioStreamFinished(uint32_t token);
+uint32_t audioStreamFrames(uint32_t token);

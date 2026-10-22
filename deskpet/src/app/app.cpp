@@ -6,6 +6,8 @@
 #include <time.h>
 #include "src/core/audio/audio.h"
 #include "src/core/power/battery.h"
+#include "src/core/storage/sd_card.h"
+#include "src/core/storage/sd_upload.h"
 #include "src/core/system/config.h"
 #include "src/features/ui/layout.h"
 #include "src/core/system/log.h"
@@ -13,6 +15,7 @@
 #include "src/app/serial_console.h"
 #include "src/app/settings_store.h"
 #include "src/features/pet/pet_assets.h"
+#include "src/features/music/music.h"
 #include "src/features/setup/setup_portal.h"
 #include "src/app/state.h"
 #include "src/features/talk/talk.h"
@@ -125,6 +128,7 @@ void handleSettingsTap(int x, int y, uint32_t now) {
 }
 
 void startAlarm(uint32_t now) {
+  stopMusic();
   state.alarmRinging = true;
   alarmStartedAt = now;
   state.lastInteraction = now;
@@ -162,7 +166,8 @@ void updateTalk(uint32_t now) {
   const DeviceSettings &device = state.device;
   const bool audible = !device.muted && device.volume > 0;
   const bool posed = petAssetsReady() && petAsset(state.pet.mascot).kind == PET_ASSET_POSES;
-  setTalkActive(device.talk && audible && posed && petPageInteractive());
+  setTalkActive(device.talk && audible && posed && petPageInteractive() && !musicActive());
+  if (musicStatus().phase == MusicPhase::Playing) state.lastInteraction = now;
   // A conversation counts as interaction: keep the screen bright and the pet awake.
   const TalkPhase phase = talkPhase();
   if (phase == TalkPhase::Hearing || phase == TalkPhase::Talking) state.lastInteraction = now;
@@ -252,6 +257,44 @@ void handleClockTap(int x, int y, uint32_t now) {
   markDeviceSettingsChanged(now);
 }
 
+void handleMusicTap(int x, int y, uint32_t now) {
+  const MusicStatus music = musicStatus();
+  if (state.musicLibraryOpen) {
+    const uint16_t pages = max<uint16_t>(1, (music.count + MUSIC_ROWS_PER_PAGE - 1) / MUSIC_ROWS_PER_PAGE);
+    state.musicLibraryPage = min<uint16_t>(state.musicLibraryPage, pages - 1);
+    if (hit(MUSIC_BACK, x, y)) state.musicLibraryOpen = false;
+    else if (hit(MUSIC_RESCAN, x, y)) { state.musicLibraryPage = 0; scanMusic(); }
+    else if (hit(MUSIC_LIST_PREVIOUS, x, y)) state.musicLibraryPage = (state.musicLibraryPage + pages - 1) % pages;
+    else if (hit(MUSIC_LIST_NEXT, x, y)) state.musicLibraryPage = (state.musicLibraryPage + 1) % pages;
+    else for (uint8_t row = 0; row < MUSIC_ROWS_PER_PAGE; ++row) {
+      const uint16_t index = state.musicLibraryPage * MUSIC_ROWS_PER_PAGE + row;
+      if (index < music.count && hit(musicTrackRow(row), x, y)) {
+        setTalkActive(false);
+        selectMusicTrack(index);
+        state.musicLibraryOpen = false;
+        break;
+      }
+    }
+    return;
+  }
+  if (hit(MUSIC_LIBRARY, x, y)) { state.musicLibraryOpen = true; state.musicLibraryPage = music.index / MUSIC_ROWS_PER_PAGE; }
+  else if (hit(MUSIC_STOP, x, y)) stopMusic();
+  else if (hit(MUSIC_PLAY, x, y)) {
+    setTalkActive(false);
+    if (music.phase == MusicPhase::Playing) pauseMusic(); else playMusic();
+  } else if (hit(MUSIC_PREVIOUS, x, y)) { setTalkActive(false); previousMusic(); }
+  else if (hit(MUSIC_NEXT, x, y)) { setTalkActive(false); nextMusic(); }
+  else if (hit(MUSIC_VOLUME_DOWN, x, y) || hit(MUSIC_VOLUME_UP, x, y)) {
+    // Steps land on multiples of 5: up goes to the next one above, down to the next one below.
+    const int current = state.device.volume;
+    const int volume = hit(MUSIC_VOLUME_UP, x, y) ? (current / 5 + 1) * 5
+                     : current % 5 == 0 ? current - 5 : current / 5 * 5;
+    state.device.volume = static_cast<uint8_t>(constrain(volume, 0, 100));
+    state.device.muted = false;
+    markDeviceSettingsChanged(now);
+  }
+}
+
 void handleTap(int x, int y, uint32_t now) {
   state.lastInteraction = now;
   if (state.alarmRinging) { if (hit(STOP_ALARM_BUTTON, x, y)) stopAlarm(now); return; }
@@ -270,6 +313,7 @@ void handleTap(int x, int y, uint32_t now) {
     case PAGE_CLOCK: handleClockTap(x, y, now); break;
     case PAGE_WEATHER: requestWeather(now); break;
     case PAGE_SETTINGS: handleSettingsTap(x, y, now); break;
+    case PAGE_MUSIC: handleMusicTap(x, y, now); break;
   }
 }
 
@@ -378,6 +422,12 @@ void printPerf() {
 }
 
 void runConsoleCommand(const ConsoleLine &line) {
+  if (state.alarmRinging && (line.command == ConsoleCommand::MusicSelect || line.command == ConsoleCommand::MusicResume ||
+      line.command == ConsoleCommand::MusicNext || line.command == ConsoleCommand::MusicPrevious)) {
+    logError("music", "Stop the ringing alarm before starting music");
+    printMusicStatus();
+    return;
+  }
   switch (line.command) {
     case ConsoleCommand::None: break;
     case ConsoleCommand::Status: printStatus(state); break;
@@ -388,6 +438,31 @@ void runConsoleCommand(const ConsoleLine &line) {
     case ConsoleCommand::AlarmStatus: printAlarmStatus(state); break;
     case ConsoleCommand::PetStatus: printPetStatus(state); break;
     case ConsoleCommand::AssetStatus: printAssetStatus(state); break;
+    case ConsoleCommand::SdStatus: printSdStatus(); break;
+    case ConsoleCommand::SdSelfTest:
+      if (musicActive()) {
+        Serial.println("{\"sd_test\":\"busy\",\"bytes\":0,\"cleanup\":false,\"sd_error\":\"Stop music before the SD write test\"}");
+        break;
+      }
+      // A failed SD write can consume the driver's full 5 s timeout. This explicit
+      // diagnostic releases the loop watchdog until the bounded I/O has returned.
+      disableLoopWDT();
+      printSdSelfTest();
+      enableLoopWDT();
+      break;
+    case ConsoleCommand::MusicStatus: printMusicStatus(); break;
+    case ConsoleCommand::MusicList: printMusicList(); break;
+    case ConsoleCommand::MusicScan: scanMusic(); printMusicStatus(); break;
+    case ConsoleCommand::MusicSelect: setTalkActive(false); selectMusicTrack(line.index); printMusicStatus(); break;
+    case ConsoleCommand::MusicPause: pauseMusic(); printMusicStatus(); break;
+    case ConsoleCommand::MusicResume: resumeMusic(); printMusicStatus(); break;
+    case ConsoleCommand::MusicStop: stopMusic(); printMusicStatus(); break;
+    case ConsoleCommand::MusicNext: setTalkActive(false); nextMusic(); printMusicStatus(); break;
+    case ConsoleCommand::MusicPrevious: setTalkActive(false); previousMusic(); printMusicStatus(); break;
+    case ConsoleCommand::SdPutBegin: beginSdUpload(line.bytes, line.text); break;
+    case ConsoleCommand::SdPutData: writeSdUploadChunk(line.text); break;
+    case ConsoleCommand::SdPutEnd: finishSdUpload(line.text); break;
+    case ConsoleCommand::SdPutAbort: abortSdUpload(); break;
     case ConsoleCommand::SoundTest: requestSound(); break;
     case ConsoleCommand::TalkStatus: printTalkStatus(); break;
     case ConsoleCommand::MicTest: runMicTest(); break;
@@ -452,6 +527,9 @@ void appSetup() {
     fatalError = true;
     return;
   }
+  showBootProgress("Checking SD card", 10);
+  initSdCard();
+  printSdStatus();
   showBootProgress("Loading companions", 15);
   initPetAssets();
   // The stored companion may have been removed from a newer asset pack.
@@ -471,6 +549,7 @@ void appSetup() {
   Wire.setTimeOut(20);
   if (!initAudio()) logError("audio", "Speaker disabled because initialization failed");
   else initTalk();
+  initMusic();
   // A ringtone in the asset pack (written by the web customizer) replaces the built-in one.
   const AssetRingtone ringtone = assetRingtone();
   if (ringtone.count != 0) {

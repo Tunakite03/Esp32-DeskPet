@@ -63,12 +63,12 @@ def main() -> None:
         send("pet"); time.sleep(1)
         scenario(f"pet idle (talk {'on' if settings['talk'] else 'off'})", [], 8)
         scenario("clock idle", [("page 1", 8)], 8)
-        scenario("tab switching every 0.3s", [("page 0", 0.3), ("page 1", 0.3), ("page 2", 0.3), ("page 3", 0.3)], 8)
-        scenario("settings: brightness +/-", [("page 3", 0.2), ("tap 290 80", 0.7), ("tap 30 80", 0.7)], 8)
+        scenario("tab switching every 0.3s", [("page 0", 0.3), ("page 1", 0.3), ("page 2", 0.3), ("page 3", 0.3), ("page 4", 0.3)], 8)
+        scenario("settings: brightness +/-", [("page 4", 0.2), ("tap 290 80", 0.7), ("tap 30 80", 0.7)], 8)
         scenario("clock: alarm hour +/-", [("page 1", 0.2), ("tap 134 150", 0.7), ("tap 34 150", 0.7)], 8)
 
         # Put the user's brightness and alarm hour back exactly as they were.
-        send("page 3"); time.sleep(0.2)
+        send("page 4"); time.sleep(0.2)
         for _ in range(12):
             now = query("settings-status", "brightness")["brightness"]
             if now == settings["brightness"]:

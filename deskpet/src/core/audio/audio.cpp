@@ -5,6 +5,7 @@
 #include <atomic>
 #include <math.h>
 #include <driver/i2s_std.h>
+#include <freertos/semphr.h>
 #include "src/core/audio/ringtone_data.h"
 #include "src/core/system/config.h"
 #include "src/core/system/log.h"
@@ -17,16 +18,30 @@ constexpr uint8_t CODEC_ADDRESS = 0x18;
 constexpr uint32_t SAMPLE_RATE = 16000;
 constexpr uint8_t MIC_GAIN = 0x05;  // REG16: 6 dB per step, 0x05 = +30 dB for speech across a desk
 
+enum class AudioSource : uint8_t { Ringtone, Recording, Music, Alarm };
 struct AudioRequest {
   uint32_t generation;
   const int16_t *samples;  // mono 16 kHz
   uint32_t count;
   bool loop;  // start again from the first sample until the request goes stale
+  AudioSource source = AudioSource::Ringtone;
+};
+
+struct StreamBlock {
+  uint32_t generation;
+  uint16_t count;
+  int16_t samples[256];
 };
 
 i2s_chan_handle_t speakerChannel = nullptr;
 i2s_chan_handle_t micChannel = nullptr;
 QueueHandle_t audioRequests = nullptr;
+SemaphoreHandle_t requestMutex = nullptr;
+AudioSource focus = AudioSource::Ringtone;  // protected by requestMutex
+bool workerActive = false;  // protected by requestMutex
+QueueHandle_t streamBlocks = nullptr;
+std::atomic<uint32_t> streamToken{0}, streamDone{0}, streamFrames{0};
+std::atomic<bool> streamPaused{false};
 std::atomic<bool> audioReady{false};
 std::atomic<bool> micAvailable{false};
 std::atomic<uint8_t> audioGain{40};
@@ -68,12 +83,16 @@ bool writeAudioSamples(const int16_t *samples, size_t count) {
 }
 
 bool requestStale(const AudioRequest &request) {
-  return audioGain.load() == 0 || audioCancelled.load() || request.generation != audioGeneration.load();
+  return (request.source != AudioSource::Music && audioGain.load() == 0) || audioCancelled.load() ||
+         request.generation != audioGeneration.load();
 }
 
 void finishRequest() {
+  xSemaphoreTake(requestMutex, portMAX_DELAY);
+  workerActive = false;
   playbackPeak.store(0);
   if (uxQueueMessagesWaiting(audioRequests) == 0) busy.store(false);
+  xSemaphoreGive(requestMutex);
 }
 
 // Streams one request in 256-frame blocks so a newer request can cut in quickly.
@@ -98,39 +117,87 @@ bool playRequest(const AudioRequest &request, int16_t *samples, uint32_t &peak) 
   }
 }
 
+bool playStream(const AudioRequest &request, int16_t *samples, uint32_t &peak) {
+  StreamBlock block{};
+  for (;;) {
+    if (requestStale(request) || !audioReady.load()) return false;
+    if (streamPaused.load()) {
+      digitalWrite(PIN_SPEAKER_MUTE, HIGH);
+      playbackPeak.store(0);
+      vTaskDelay(pdMS_TO_TICKS(10));
+      continue;
+    }
+    if (xQueueReceive(streamBlocks, &block, pdMS_TO_TICKS(20)) != pdTRUE) continue;
+    if (block.generation != request.generation) continue;
+    if (block.count == 0) return true;
+    const float volume = audioGain.load() / 100.0F;
+    uint32_t blockPeak = 0;
+    for (uint16_t index = 0; index < block.count; ++index) {
+      const int16_t value = static_cast<int16_t>(block.samples[index] * volume * volume);
+      samples[index * 2] = value;
+      samples[index * 2 + 1] = value;
+      blockPeak = max(blockPeak, static_cast<uint32_t>(abs(static_cast<int>(value))));
+    }
+    if (requestStale(request)) return false;
+    digitalWrite(PIN_SPEAKER_MUTE, audioGain.load() == 0 || streamPaused.load() ? HIGH : LOW);
+    if (!writeAudioSamples(samples, block.count * 2)) return false;
+    xSemaphoreTake(requestMutex, portMAX_DELAY);
+    if (request.generation == streamToken.load()) streamFrames.fetch_add(block.count);
+    xSemaphoreGive(requestMutex);
+    peak = max(peak, blockPeak);
+    playbackPeak.store(static_cast<uint16_t>(blockPeak));
+  }
+}
+
 void audioWorker(void *) {
   AudioRequest request{};
   int16_t samples[512]{};
   for (;;) {
     if (xQueueReceive(audioRequests, &request, portMAX_DELAY) != pdTRUE) continue;
+    xSemaphoreTake(requestMutex, portMAX_DELAY);
+    workerActive = true;
+    xSemaphoreGive(requestMutex);
     if (!audioReady.load() || requestStale(request)) { finishRequest(); continue; }
     // Prime the DMA buffer with silence before enabling the amplifier to avoid a pop.
     memset(samples, 0, sizeof(samples));
     if (!writeAudioSamples(samples, 512)) { finishRequest(); continue; }
     vTaskDelay(pdMS_TO_TICKS(100));
     if (requestStale(request)) { finishRequest(); continue; }
-    digitalWrite(PIN_SPEAKER_MUTE, LOW);
+    digitalWrite(PIN_SPEAKER_MUTE, audioGain.load() == 0 ? HIGH : LOW);
     uint32_t peak = 0;
-    const bool complete = playRequest(request, samples, peak);
+    const bool complete = request.source == AudioSource::Music ? playStream(request, samples, peak) : playRequest(request, samples, peak);
     vTaskDelay(pdMS_TO_TICKS(100));
     digitalWrite(PIN_SPEAKER_MUTE, HIGH);
     if (complete) {
       audioPeak.store(peak);
       audioCompleted.fetch_add(1);
-      Serial.println(request.samples == ringtoneSamples ? "{\"event\":\"sound_complete\"}" : "{\"event\":\"recording_complete\"}");
+      Serial.println(request.source == AudioSource::Music ? "{\"event\":\"music_complete\"}" : request.samples == ringtoneSamples ?
+                     "{\"event\":\"sound_complete\"}" : "{\"event\":\"recording_complete\"}");
     }
+    if (request.source == AudioSource::Music) streamDone.store(request.generation);
+    xSemaphoreTake(requestMutex, portMAX_DELAY);
+    if (request.generation == audioGeneration.load()) focus = AudioSource::Ringtone;
+    xSemaphoreGive(requestMutex);
     finishRequest();
   }
 }
 
-void queueRequest(const int16_t *samples, uint32_t count, bool loop) {
+void queueRequest(const int16_t *samples, uint32_t count, AudioSource source) {
+  xSemaphoreTake(requestMutex, portMAX_DELAY);
+  if ((focus == AudioSource::Alarm && source != AudioSource::Alarm) ||
+      (focus == AudioSource::Music && source == AudioSource::Recording)) {
+    xSemaphoreGive(requestMutex);
+    return;
+  }
+  focus = source;
   audioCancelled.store(false);
   busy.store(true);
-  const AudioRequest event{audioGeneration.fetch_add(1) + 1, samples, count, loop};
+  const AudioRequest event{audioGeneration.fetch_add(1) + 1, samples, count, source == AudioSource::Alarm, source};
   if (xQueueOverwrite(audioRequests, &event) != pdTRUE) {
     busy.store(false);
     logError("audio", "Unable to queue sound");
   }
+  xSemaphoreGive(requestMutex);
 }
 }  // namespace
 
@@ -171,7 +238,9 @@ bool initAudio() {
     logError("codec", "DAC configuration readback failed"); return false;
   }
   audioRequests = xQueueCreate(1, sizeof(AudioRequest));
-  if (!audioRequests || xTaskCreatePinnedToCore(audioWorker, "speaker", 6144, nullptr, 1, nullptr, 0) != pdPASS) {
+  streamBlocks = xQueueCreate(12, sizeof(StreamBlock));
+  requestMutex = xSemaphoreCreateMutex();
+  if (!audioRequests || !streamBlocks || !requestMutex || xTaskCreatePinnedToCore(audioWorker, "speaker", 6144, nullptr, 1, nullptr, 0) != pdPASS) {
     logError("audio", "Speaker worker allocation failed"); return false;
   }
   audioReady.store(true);
@@ -201,26 +270,30 @@ void setRingtone(const int16_t *samples, uint32_t count) {
 void requestSound() {
   if (!audioReady.load()) { logError("audio", "Speaker is unavailable"); return; }
   if (audioGain.load() == 0) return;
-  queueRequest(ringtoneSamples, ringtoneCount, false);
+  queueRequest(ringtoneSamples, ringtoneCount, AudioSource::Ringtone);
 }
 
 // Plays the ringtone again and again until cancelSound() or a newer request.
 void startRinging() {
   if (!audioReady.load()) { logError("audio", "Speaker is unavailable"); return; }
   if (audioGain.load() == 0) return;
-  queueRequest(ringtoneSamples, ringtoneCount, true);
+  queueRequest(ringtoneSamples, ringtoneCount, AudioSource::Alarm);
 }
 
 void playRecording(const int16_t *samples, uint32_t count) {
   if (!audioReady.load() || audioGain.load() == 0 || !samples || count == 0) return;
-  queueRequest(samples, count, false);
+  queueRequest(samples, count, AudioSource::Recording);
 }
 
 void cancelSound() {
+  if (requestMutex) xSemaphoreTake(requestMutex, portMAX_DELAY);
+  focus = AudioSource::Ringtone;
   audioCancelled.store(true);
   audioGeneration.fetch_add(1);
   if (audioRequests) xQueueReset(audioRequests);
+  if (!workerActive) busy.store(false);
   digitalWrite(PIN_SPEAKER_MUTE, HIGH);
+  if (requestMutex) xSemaphoreGive(requestMutex);
 }
 
 bool audioBusy() { return busy.load(); }
@@ -245,3 +318,74 @@ size_t readMicrophone(int16_t *samples, size_t frames, uint32_t timeoutMs) {
 }
 
 AudioStats audioStats() { return {audioCompleted.load(), audioPeak.load()}; }
+
+uint32_t beginAudioStream() {
+  if (!audioReady.load() || !streamBlocks) return 0;
+  xSemaphoreTake(requestMutex, portMAX_DELAY);
+  if (focus == AudioSource::Alarm) { xSemaphoreGive(requestMutex); return 0; }
+  focus = AudioSource::Music;
+  const uint32_t token = audioGeneration.fetch_add(1) + 1;
+  streamToken.store(token);
+  streamFrames.store(0);
+  streamPaused.store(false);
+  audioCancelled.store(false);
+  busy.store(true);
+  xQueueReset(streamBlocks);
+  const AudioRequest request{token, nullptr, 0, false, AudioSource::Music};
+  if (xQueueOverwrite(audioRequests, &request) != pdTRUE) {
+    busy.store(false);
+    logError("audio", "Unable to queue the music stream");
+    xSemaphoreGive(requestMutex);
+    return 0;
+  }
+  xSemaphoreGive(requestMutex);
+  return token;
+}
+
+bool audioStreamCurrent(uint32_t token) {
+  return token != 0 && token == audioGeneration.load() && !audioCancelled.load() && audioReady.load();
+}
+
+bool queueAudioStream(uint32_t token, const int16_t *samples, uint16_t count) {
+  if (!samples || count == 0 || count > 256 || !audioStreamCurrent(token)) return false;
+  StreamBlock block{};
+  block.generation = token;
+  block.count = count;
+  memcpy(block.samples, samples, count * sizeof(int16_t));
+  return xQueueSend(streamBlocks, &block, pdMS_TO_TICKS(20)) == pdTRUE && audioStreamCurrent(token);
+}
+
+bool finishAudioStream(uint32_t token) {
+  if (!audioStreamCurrent(token)) return false;
+  const StreamBlock end{token, 0, {}};
+  return xQueueSend(streamBlocks, &end, pdMS_TO_TICKS(20)) == pdTRUE;
+}
+
+void pauseAudioStream(uint32_t token) {
+  if (!requestMutex) return;
+  xSemaphoreTake(requestMutex, portMAX_DELAY);
+  if (audioStreamCurrent(token)) { streamPaused.store(true); digitalWrite(PIN_SPEAKER_MUTE, HIGH); }
+  xSemaphoreGive(requestMutex);
+}
+
+void resumeAudioStream(uint32_t token) {
+  if (!requestMutex) return;
+  xSemaphoreTake(requestMutex, portMAX_DELAY);
+  if (audioStreamCurrent(token)) streamPaused.store(false);
+  xSemaphoreGive(requestMutex);
+}
+void stopAudioStream(uint32_t token) {
+  if (!requestMutex) return;
+  xSemaphoreTake(requestMutex, portMAX_DELAY);
+  if (audioStreamCurrent(token)) {
+    focus = AudioSource::Ringtone;
+    audioCancelled.store(true);
+    audioGeneration.fetch_add(1);
+    xQueueReset(audioRequests);
+    if (!workerActive) busy.store(false);
+    digitalWrite(PIN_SPEAKER_MUTE, HIGH);
+  }
+  xSemaphoreGive(requestMutex);
+}
+bool audioStreamFinished(uint32_t token) { return token != 0 && streamDone.load() == token; }
+uint32_t audioStreamFrames(uint32_t token) { return token == streamToken.load() ? streamFrames.load() : 0; }

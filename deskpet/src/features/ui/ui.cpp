@@ -6,6 +6,7 @@
 #include "src/core/audio/audio.h"
 #include "src/core/system/config.h"
 #include "src/core/system/log.h"
+#include "src/features/music/music.h"
 #include "src/features/pet/pet_assets.h"
 #include "src/features/talk/talk.h"
 #include "src/features/ui/layout.h"
@@ -165,6 +166,8 @@ void renderFrame(const AppState &state, uint32_t now) {
   const DeviceSettings &device = state.device;
   const bool sleeping = now - state.lastInteraction > PET_SLEEP_AFTER && !pet.reacting;
   const bool petVisible = !state.alarmRinging && !state.setup.open && state.page == PAGE_PET && !pet.pickerOpen;
+  const bool musicVisible = !state.alarmRinging && !state.setup.open && state.page == PAGE_MUSIC;
+  const MusicStatus music = musicVisible ? musicStatus() : MusicStatus{};
   const uint32_t animation = petVisible ? petVisualFrame(state, now) * 5 + petBounceStep(state, now) : 0;
   trackNavPage(state.page, now);
   // Everything that can change what is on screen. Identical stamps skip the frame.
@@ -177,7 +180,9 @@ void renderFrame(const AppState &state, uint32_t now) {
     device.brightness, device.volume, device.muted, audioIsReady(),
     pet.mascot, pet.pickerOpen, pet.pickerPage, petAssetsReady(), static_cast<uint8_t>(pet.expression),
     device.talk, micReady(), static_cast<uint8_t>(talkPhase()), talkLevel(), petVisible ? listenWaves(now) : 0u,
-    weatherSpinnerStep(state, now), navSlideStep(now)
+    weatherSpinnerStep(state, now), navSlideStep(now), state.musicLibraryOpen, state.musicLibraryPage,
+    music.ready, static_cast<uint8_t>(music.phase), static_cast<uint8_t>(music.error), music.revision,
+    music.count, music.index, music.elapsedMs / 1000, music.progress
   };
   static uint32_t previousStamp[sizeof(stamp) / sizeof(stamp[0])]{};
   lastTiming = RenderTiming{};
@@ -195,6 +200,7 @@ void renderFrame(const AppState &state, uint32_t now) {
       case PAGE_PET: drawPet(state, now); break;
       case PAGE_CLOCK: drawClock(state); break;
       case PAGE_WEATHER: drawWeather(state, now); break;
+      case PAGE_MUSIC: drawMusic(state, music); break;
       default: drawSettings(state); break;
     }
     footer(navPillAt(now));

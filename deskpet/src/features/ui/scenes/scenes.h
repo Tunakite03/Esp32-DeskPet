@@ -2,6 +2,8 @@
 #include <stdint.h>
 #include "src/app/state.h"
 
+struct MusicStatus;
+
 // One draw function per screen. Each paints the whole content area into
 // ui::canvas; ui.cpp clears the canvas first and adds the tab bar afterwards.
 namespace ui {
@@ -25,6 +27,9 @@ uint32_t weatherSpinnerStep(const AppState &state, uint32_t now);
 
 // Settings page (settings_scene.cpp).
 void drawSettings(const AppState &state);
+
+// Music player and cached track browser (music_scene.cpp).
+void drawMusic(const AppState &state, const MusicStatus &music);
 
 // Wi-Fi setup overlay (setup_scene.cpp).
 void drawConfig(const AppState &state);

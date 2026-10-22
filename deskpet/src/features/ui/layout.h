@@ -18,9 +18,10 @@ constexpr bool hit(const Rect &rect, int x, int y) { return rect.contains(x, y, 
 
 // Navigation bar: one tab per page across the bottom of the screen.
 constexpr Rect NAV_BAR{0, 207, SCREEN_WIDTH, SCREEN_HEIGHT - 207};
-constexpr int NAV_TAB_WIDTH = 80;
+constexpr int NAV_TAB_WIDTH = 64;
 constexpr int NAV_DIVIDER_Y = 205;
-constexpr int NAV_LABEL_Y = 218;
+constexpr int NAV_ICON_Y = 210;
+constexpr int NAV_LABEL_Y = 226;
 
 // Pet page. The companion stands on a baseline to the right of the clock.
 constexpr Rect PET_AREA{160, 35, 160, 170};
@@ -64,6 +65,21 @@ constexpr Slider VOLUME_SLIDER{144};
 constexpr Rect MUTE_BUTTON{18, 174, 89, 30};
 constexpr Rect TEST_SOUND_BUTTON{115, 174, 89, 30};
 constexpr Rect TALK_BUTTON{213, 174, 89, 30};
+
+// Music player and the three-row library share their bounds with touch handling.
+constexpr Rect MUSIC_PREVIOUS{24, 116, 64, 48};
+constexpr Rect MUSIC_PLAY{112, 112, 96, 52};
+constexpr Rect MUSIC_NEXT{232, 116, 64, 48};
+constexpr Rect MUSIC_VOLUME_DOWN{14, 174, 32, 30};
+constexpr Rect MUSIC_VOLUME_UP{108, 174, 32, 30};
+constexpr Rect MUSIC_STOP{148, 174, 68, 30};
+constexpr Rect MUSIC_LIBRARY{224, 174, 82, 30};
+constexpr uint8_t MUSIC_ROWS_PER_PAGE = 3;
+constexpr Rect musicTrackRow(uint8_t slot) { return {14, 38 + slot * 42, 292, 38}; }
+constexpr Rect MUSIC_LIST_PREVIOUS{14, 174, 44, 30};
+constexpr Rect MUSIC_LIST_NEXT{118, 174, 44, 30};
+constexpr Rect MUSIC_RESCAN{170, 174, 70, 30};
+constexpr Rect MUSIC_BACK{248, 174, 58, 30};
 
 // Clock page: hour and minute steppers above two buttons.
 constexpr Rect ALARM_HOUR_DOWN{18, 136, 32, 30};

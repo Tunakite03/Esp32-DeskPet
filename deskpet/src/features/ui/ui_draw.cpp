@@ -20,11 +20,7 @@ const UiGlyph *findGlyph(const UiFont &font, char character) {
   return nullptr;
 }
 
-constexpr const char *NAV_LABELS[PAGE_COUNT] = {"Pet", "Clock", "Weather", "Settings"};
-constexpr int NAV_PILL_PADDING = 8, NAV_PILL_Y = 211, NAV_PILL_HEIGHT = 26;
-
-// Icon, 6 px gap and label of one tab.
-int navContentWidth(uint8_t page) { return textWidth(NAV_LABELS[page], FONT_SMALL) + 20; }
+constexpr const char *NAV_LABELS[PAGE_COUNT] = {"Pet", "Clock", "Weather", "Music", "Settings"};
 
 // Mixes fg over bg; alpha runs from 0 (bg) to 15 (fg).
 uint16_t blend565(uint16_t fg, uint16_t bg, uint8_t alpha) {
@@ -98,6 +94,8 @@ void navIcon(int x, int y, uint8_t page, const Rect &pill) {
       {0x03F0, 0x0C0C, 0x1002, 0x2001, 0x20C1, 0x20C1, 0x20F9, 0x20C1, 0x2001, 0x1002, 0x0C0C, 0x03F0, 0x0000, 0x0000},
       // PAGE_WEATHER: Cloud with falling rain drops
       {0x01E0, 0x07F8, 0x0804, 0x1002, 0x2001, 0x2001, 0x2001, 0x1FFE, 0x0000, 0x0888, 0x0888, 0x0000, 0x0888, 0x0888},
+      // PAGE_MUSIC: Paired eighth notes
+      {0x0000, 0x01FC, 0x01FC, 0x018C, 0x018C, 0x018C, 0x018C, 0x018C, 0x018C, 0x079C, 0x0FBC, 0x0F38, 0x0600, 0x0000},
       // PAGE_SETTINGS: 8-tooth mechanical cog with center axle hole
       {0x01E0, 0x01E0, 0x0CCC, 0x1E1E, 0x0FFC, 0x33F3, 0x3213, 0x3213, 0x33F3, 0x0FFC, 0x1E1E, 0x0CCC, 0x01E0, 0x01E0},
   };
@@ -194,17 +192,16 @@ void header(const char *title, const BatteryReading &battery) {
 }
 
 Rect navPill(uint8_t page) {
-  const int width = navContentWidth(page) + 2 * NAV_PILL_PADDING;
-  return {page * NAV_TAB_WIDTH + (NAV_TAB_WIDTH - width) / 2, NAV_PILL_Y, width, NAV_PILL_HEIGHT};
+  return {page * NAV_TAB_WIDTH + 4, 209, 56, 30};
 }
 
 void footer(const Rect &pill) {
   canvas.drawFastHLine(16, NAV_DIVIDER_Y, 288, COLOR_SURFACE);
   fillPill(pill, COLOR_ACCENT);
   for (uint8_t page = 0; page < PAGE_COUNT; ++page) {
-    const int x = page * NAV_TAB_WIDTH + (NAV_TAB_WIDTH - navContentWidth(page)) / 2;
-    navIcon(x, NAV_LABEL_Y, page, pill);
-    navLabel(x + 20, NAV_LABEL_Y, NAV_LABELS[page], pill);
+    const int center = page * NAV_TAB_WIDTH + NAV_TAB_WIDTH / 2;
+    navIcon(center - 7, NAV_ICON_Y, page, pill);
+    navLabel(center - textWidth(NAV_LABELS[page], FONT_SMALL) / 2, NAV_LABEL_Y, NAV_LABELS[page], pill);
   }
 }
 
