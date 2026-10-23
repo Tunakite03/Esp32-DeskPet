@@ -5,7 +5,7 @@
 #include "src/features/pet/pet_assets.h"
 #include "src/features/weather/weather.h"
 
-enum Page : uint8_t { PAGE_PET, PAGE_CLOCK, PAGE_WEATHER, PAGE_SETTINGS, PAGE_COUNT };
+enum Page : uint8_t { PAGE_PET, PAGE_CLOCK, PAGE_WEATHER, PAGE_MUSIC, PAGE_SETTINGS, PAGE_COUNT };
 enum class PetExpression : uint8_t { Blink, Love, Sparkle, Surprise, Wink, Bashful, Sleepy, Dizzy, Joy };
 
 struct TouchState {
@@ -64,4 +64,6 @@ struct AppState {
   uint32_t lastInteraction = 0;
   // Bumped for changes the render stamp cannot see (pet name, place).
   uint32_t uiRevision = 0;
+  bool musicLibraryOpen = false;
+  uint16_t musicLibraryPage = 0;
 };

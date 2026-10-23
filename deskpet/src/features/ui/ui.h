@@ -19,6 +19,8 @@ RenderTiming lastRenderTiming();
 // Sends the next few tile rows of the last drawn frame, for about budgetUs at most.
 // Call it every loop after renderFrame().
 void pumpDisplay(uint32_t budgetUs);
+// Keep the main loop fast until the current frame has reached the panel.
+bool displayTransferPending();
 void printUiStats();
 // Dumps the framebuffer over serial for the QA scripts.
 void writeSnapshot();

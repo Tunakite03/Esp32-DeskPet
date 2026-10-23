@@ -126,7 +126,7 @@ def main() -> None:
         assert query("pet-status", "picker_open")["picker_open"] is True
         assert query("asset-status", "picker_page")["picker_page"] == 0
         snapshot("picker-0")
-        for page, name in ((1, "clock"), (2, "weather"), (3, "settings")):
+        for page, name in ((1, "clock"), (2, "weather"), (4, "settings")):
             send(f"page {page}")
             snapshot(name)
         after_settings = query("settings-status", "brightness")

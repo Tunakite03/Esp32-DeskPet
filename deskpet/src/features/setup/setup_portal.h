@@ -23,5 +23,6 @@ void initSetupPortal(AppState &state, const NetworkCredentials &network, SetupSa
 // Starts the access point and web server; false when it was already open or the AP failed.
 bool openSetupPortal();
 void closeSetupPortal();
-// Serves pending HTTP requests; call every loop while the portal is open.
+// Serves requests and closes after 5 minutes without web/device activity.
+// Call every loop while the portal is open.
 void pollSetupPortal();

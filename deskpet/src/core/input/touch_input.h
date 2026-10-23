@@ -13,5 +13,7 @@ struct TouchSample {
 bool startTouchInput();
 // Next queued change (press, move or release); false when none is waiting.
 bool nextTouchSample(TouchSample &sample);
+// Blocks until a sample is queued or the timeout expires. Does not consume it.
+void waitForTouchSample(uint32_t timeoutMs);
 // Consecutive failed reads; non-zero means the controller is not answering.
 uint8_t touchFailures();
