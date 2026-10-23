@@ -93,4 +93,12 @@ bool startTouchInput() {
 
 bool nextTouchSample(TouchSample &sample) { return samples && xQueueReceive(samples, &sample, 0) == pdTRUE; }
 
+void waitForTouchSample(uint32_t timeoutMs) {
+  // Peek without consuming: pollTouch() must still receive every press/release.
+  // This also covers a sample arriving between pollTouch() and this wait.
+  TouchSample sample;
+  if (samples) xQueuePeek(samples, &sample, pdMS_TO_TICKS(timeoutMs));
+  else vTaskDelay(pdMS_TO_TICKS(timeoutMs));
+}
+
 uint8_t touchFailures() { return failures.load(); }

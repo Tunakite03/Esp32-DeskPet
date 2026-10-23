@@ -133,6 +133,8 @@ void pumpDisplay(uint32_t budgetUs) {
   while (transferRow < TILE_ROWS && micros() - started < budgetUs) flushTileRow(transferRow++);
 }
 
+bool displayTransferPending() { return transferRow < TILE_ROWS; }
+
 bool initDisplay(uint8_t backlight) {
   pinMode(PIN_BACKLIGHT, OUTPUT);
   digitalWrite(PIN_BACKLIGHT, LOW);

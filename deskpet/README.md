@@ -69,6 +69,43 @@ Verify a connected board:
 python tools/verify_pet_assets.py --port COM9
 ```
 
+## Basic battery saving
+
+- Music playback does not keep the backlight awake. After 60 seconds without
+  interaction it dims to one quarter of the saved brightness (minimum PWM 3),
+  while playback continues. A touch restores brightness. Alarm, setup and Settings
+  retain their existing brightness behavior; this does not put the ESP32 to sleep.
+- Setup Wi-Fi closes after 5 minutes without device or web activity. Opening the
+  form, scanning, saving, and interacting with the form extend the timeout.
+  A connected phone or abandoned browser tab alone does not keep it open.
+  The device returns to the Pet page and reconnects to the saved network. Hold
+  BOOT to open setup again. Without JavaScript, submit or reload within 5 minutes.
+- After 1 second without interaction or serial traffic, the main loop waits up
+  to 10 ms instead of 2 ms when idle. A queued touch wakes it immediately without
+  consuming the sample. The touch sampler still runs every 10 ms. Music, Talk,
+  alarms, held buttons/touches, reactions and pending display transfers retain
+  the fast loop. Serial traffic restores the fast loop for uploads.
+
+Host regression checks (run from the repository root; keep test executables outside it):
+
+```bash
+g++ -std=c++17 -Wall -Wextra -Werror -Ideskpet deskpet/tests/power_policy_test.cpp -o /tmp/deskpet-power-test
+```
+
+```bash
+/tmp/deskpet-power-test
+```
+
+```bash
+node deskpet/tests/setup_activity_test.cjs
+```
+
+These checks cover timing policy and browser activity signaling, not real current
+consumption or physical touch/audio behavior. Before release, flash the board and
+run `tools/perf_probe.py`, serial `selftest`, and `tools/verify_music.py`. Also check
+music continues while the backlight dims, touching restores brightness, and setup
+closes after inactivity but stays open while the form is being edited.
+
 ## SD card storage
 
 DeskPet mounts the ES3C28P microSD socket automatically during boot using SDIO at

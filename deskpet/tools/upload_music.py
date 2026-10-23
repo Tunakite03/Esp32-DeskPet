@@ -28,19 +28,20 @@ MAX_NAME = 120
 PROGRESS_EVERY = 1024 * 1024
 
 
-def read_json(port: serial.Serial, key: str, timeout_s: float = 15.0) -> dict:
+def read_json(port: serial.Serial, key: str, timeout_s: float = 60.0) -> dict:
     deadline = time.monotonic() + timeout_s
     while time.monotonic() < deadline:
         raw = port.readline().decode("utf-8", errors="replace").strip()
         if not raw.startswith("{"):
             continue
-        record = json.loads(raw)
-        if isinstance(record, dict) and key in record:
-            return record
+        with contextlib.suppress(json.JSONDecodeError):
+            record = json.loads(raw)
+            if isinstance(record, dict) and key in record:
+                return record
     raise TimeoutError(f"No {key} reply from DeskPet")
 
 
-def send(port: serial.Serial, command: str, key: str = "sd_put", timeout_s: float = 15.0) -> dict:
+def send(port: serial.Serial, command: str, key: str = "sd_put", timeout_s: float = 60.0) -> dict:
     port.write((command + "\n").encode("ascii"))
     return read_json(port, key, timeout_s)
 
@@ -81,7 +82,7 @@ def upload(port: serial.Serial, path: Path) -> dict:
             if previous // PROGRESS_EVERY != sent // PROGRESS_EVERY:
                 print(f"  {name}: {min(sent, len(data))} of {len(data)} bytes", flush=True)
         # DeskPet reads the whole file back before it answers, which takes longer for big tracks.
-        reply = send(port, f"sd-put-end {zlib.crc32(data):08x}", timeout_s=180)
+        reply = send(port, f"sd-put-end {zlib.crc32(data):08x}", timeout_s=300)
         if reply["sd_put"] != "done":
             raise RuntimeError(f"{name}: {reply.get('error', reply)}")
         return reply

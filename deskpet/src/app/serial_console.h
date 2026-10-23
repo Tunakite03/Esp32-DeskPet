@@ -11,7 +11,7 @@ enum class ConsoleCommand : uint8_t {
   SoundTest, TalkStatus, MicTest, TalkTune, Reboot, Hold, Tap, Snapshot, Page, SelfTest,
   Setup, Pet, ApPassword, SdStatus, SdSelfTest, MusicStatus, MusicList, MusicScan,
   MusicSelect, MusicPause, MusicResume, MusicStop, MusicNext, MusicPrevious,
-  SdPutBegin, SdPutData, SdPutEnd, SdPutAbort
+  SdPutBegin, SdPutData, SdPutEnd, SdPutAbort, SdDelete
 };
 
 struct ConsoleLine {

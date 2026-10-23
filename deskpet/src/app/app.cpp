@@ -6,6 +6,7 @@
 #include <time.h>
 #include "src/core/audio/audio.h"
 #include "src/core/power/battery.h"
+#include "src/core/power/power_policy.h"
 #include "src/core/storage/sd_card.h"
 #include "src/core/storage/sd_upload.h"
 #include "src/core/system/config.h"
@@ -32,7 +33,6 @@ constexpr uint32_t BATTERY_INTERVAL = 30000UL;
 // DHCP and DNS are often not ready the moment Wi-Fi reports a connection.
 constexpr uint32_t NETWORK_SETTLE = 3000;
 constexpr uint32_t REACTION_DURATION = 1100;
-constexpr uint32_t DIM_AFTER = 60000;
 constexpr uint32_t FRAME_INTERVAL = 50;
 constexpr uint32_t LONG_PRESS = 650;
 constexpr int LONG_PRESS_SLOP = 15, TAP_SLOP = 25;
@@ -44,7 +44,7 @@ NetworkCredentials network;
 uint32_t alarmStartedAt = 0, lastAlarmCheck = 0;
 uint8_t petReactionIndex = 0, rapidPetTaps = 0;
 uint32_t lastPetTapAt = 0, lastFrame = 0, lastWeatherAttempt = 0, lastBatteryRead = 0;
-uint32_t buttonAt = 0, lastReconnect = 0;
+uint32_t buttonAt = 0, lastReconnect = 0, lastSerialActivity = 0;
 bool buttonHeld = false, buttonWasDown = false, everConnected = false;
 bool fatalError = false, setupOffered = false;
 uint32_t pendingConnectAt = 0;
@@ -167,7 +167,7 @@ void updateTalk(uint32_t now) {
   const bool audible = !device.muted && device.volume > 0;
   const bool posed = petAssetsReady() && petAsset(state.pet.mascot).kind == PET_ASSET_POSES;
   setTalkActive(device.talk && audible && posed && petPageInteractive() && !musicActive());
-  if (musicStatus().phase == MusicPhase::Playing) state.lastInteraction = now;
+  // Playback is not user input: the backlight may dim while music keeps playing.
   // A conversation counts as interaction: keep the screen bright and the pet awake.
   const TalkPhase phase = talkPhase();
   if (phase == TalkPhase::Hearing || phase == TalkPhase::Talking) state.lastInteraction = now;
@@ -385,6 +385,8 @@ void pollTouch(uint32_t now) {
 void pollButton(uint32_t now) {
   const bool pressed = digitalRead(PIN_BOOT_BUTTON) == LOW;
   if (pressed && !buttonWasDown) {
+    // A press is activity immediately, even just before the setup timeout.
+    state.lastInteraction = now;
     buttonAt = now;
     buttonHeld = false;
     if (state.alarmRinging) { stopAlarm(now); buttonHeld = true; }
@@ -463,6 +465,7 @@ void runConsoleCommand(const ConsoleLine &line) {
     case ConsoleCommand::SdPutData: writeSdUploadChunk(line.text); break;
     case ConsoleCommand::SdPutEnd: finishSdUpload(line.text); break;
     case ConsoleCommand::SdPutAbort: abortSdUpload(); break;
+    case ConsoleCommand::SdDelete: deleteSdMusic(line.text); break;
     case ConsoleCommand::SoundTest: requestSound(); break;
     case ConsoleCommand::TalkStatus: printTalkStatus(); break;
     case ConsoleCommand::MicTest: runMicTest(); break;
@@ -503,6 +506,8 @@ void runConsoleCommand(const ConsoleLine &line) {
 }
 
 void pollSerial() {
+  // Keep chunked uploads responsive, including an incomplete serial command.
+  if (Serial.available()) lastSerialActivity = millis();
   ConsoleLine line;
   while (readConsoleLine(line)) {
     runConsoleCommand(line);
@@ -590,8 +595,9 @@ void appLoop() {
   pollTouch(inputAt);
   pollButton(inputAt);
   pollSerial();
-  const uint32_t now = millis();
   if (state.setup.open) pollSetupPortal();
+  // A portal request or timeout may change lastInteraction; sample time afterwards.
+  const uint32_t now = millis();
   if (pendingConnectAt != 0 && static_cast<int32_t>(now - pendingConnectAt) >= 0) {
     pendingConnectAt = 0;
     WiFi.disconnect(false, false);
@@ -656,9 +662,8 @@ void appLoop() {
   saveDeviceSettings(state, now);
   perf.maxSaveUs = max(perf.maxSaveUs, micros() - saveStarted);
   const uint8_t brightness = state.device.brightness;
-  const bool idle = !state.alarmRinging && !state.setup.open && state.page != PAGE_SETTINGS &&
-                    now - state.lastInteraction > DIM_AFTER;
-  const uint8_t backlight = idle ? max(3, brightness / 4) : brightness;
+  const bool mayDim = !state.alarmRinging && !state.setup.open && state.page != PAGE_SETTINGS;
+  const uint8_t backlight = power::backlightAfterInactivity(brightness, mayDim, now, state.lastInteraction);
   static int lastBacklight = -1;
   if (backlight != lastBacklight) { setBacklight(backlight); lastBacklight = backlight; }
   // Input is answered on the very next loop; animation runs on the regular frame tick.
@@ -688,5 +693,10 @@ void appLoop() {
   perf.maxPumpUs = max(perf.maxPumpUs, micros() - pumpStarted);
   ++perf.loops;
   perf.maxLoopUs = max(perf.maxLoopUs, micros() - loopStarted);
-  delay(2);
+  // Only the main loop slows down. Audio workers and the 10 ms touch sampler
+  // keep their timing; a queued touch wakes this wait immediately.
+  const bool busy = state.touch.down || buttonWasDown || state.setup.open || state.alarmRinging ||
+                    state.pet.reacting || audioBusy() || musicActive() || talkPhase() != TalkPhase::Off ||
+                    displayTransferPending();
+  waitForTouchSample(power::loopWaitMs(millis(), state.lastInteraction, lastSerialActivity, busy));
 }

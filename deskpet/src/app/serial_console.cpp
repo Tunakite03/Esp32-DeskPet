@@ -132,6 +132,14 @@ ConsoleLine parseLine() {
     line.text = serialLine.substring(11);
     return simple(ConsoleCommand::SdPutEnd);
   }
+  if (serialLine.startsWith("sd-delete ")) {
+    line.text = serialLine.substring(10);
+    return simple(ConsoleCommand::SdDelete);
+  }
+  if (serialLine.startsWith("sd-rm ")) {
+    line.text = serialLine.substring(6);
+    return simple(ConsoleCommand::SdDelete);
+  }
   if (!serialLine.isEmpty()) printConsoleHelp();
   return line;
 }

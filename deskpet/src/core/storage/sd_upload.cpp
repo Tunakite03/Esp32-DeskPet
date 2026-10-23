@@ -171,3 +171,16 @@ void abortSdUpload() {
   discardUpload();
   Serial.printf("{\"sd_put\":\"aborted\",\"was_active\":%s}\n", wasActive ? "true" : "false");
 }
+
+void deleteSdMusic(const String &name) {
+  discardUpload();
+  if (musicActive()) stopMusic();
+  const String path = name.startsWith("/") ? name : String(MUSIC_DIRECTORY) + "/" + name;
+  if (!SD_MMC.exists(path)) {
+    Serial.printf("{\"sd_delete\":\"error\",\"error\":\"not_found\",\"path\":\"%s\"}\n", path.c_str());
+    return;
+  }
+  const bool ok = SD_MMC.remove(path);
+  Serial.printf("{\"sd_delete\":\"%s\",\"path\":\"%s\"}\n", ok ? "ok" : "error", path.c_str());
+  if (ok && musicStatus().ready) scanMusic();
+}

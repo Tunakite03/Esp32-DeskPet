@@ -11,3 +11,4 @@ void writeSdUploadChunk(const String &base64);
 // Checks the stored file against the 8-digit hex CRC32 and renames it into place.
 void finishSdUpload(const String &crc32Hex);
 void abortSdUpload();
+void deleteSdMusic(const String &name);

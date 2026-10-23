@@ -8,6 +8,7 @@
 #include <time.h>
 #include <vector>
 #include "src/core/system/config.h"
+#include "src/core/power/power_policy.h"
 #include "src/core/system/log.h"
 #include "src/core/system/timekeeping.h"
 
@@ -17,6 +18,7 @@ AppState *appState = nullptr;
 const NetworkCredentials *currentNetwork = nullptr;
 SetupSavedHandler savedHandler = nullptr;
 String formToken;
+uint32_t lastWebActivity = 0;
 
 String escapeHtml(const String &value) {
   String result = value;
@@ -94,11 +96,25 @@ bool setupClientAllowed() {
   return appState->setup.open && address[0] == 192 && address[1] == 168 && address[2] == 4;
 }
 
+bool setupTokenAllowed() {
+  return setupClientAllowed() && server.hasArg("token") && server.arg("token") == formToken;
+}
+
+void handleActivity() {
+  if (!setupTokenAllowed()) {
+    server.send(403, "text/plain", "Invalid setup session.");
+    return;
+  }
+  lastWebActivity = millis();
+  server.send(204, "text/plain", "");
+}
+
 void handleScan() {
   if (!setupClientAllowed()) {
     server.send(403, "application/json", "{\"error\":\"forbidden\"}");
     return;
   }
+  lastWebActivity = millis();
   if (server.hasArg("rescan")) {
     triggerWifiScan();
     server.sendHeader("Cache-Control", "no-store");
@@ -138,6 +154,7 @@ void serveSetup() {
     server.send(403, "text/plain", "Connect to the setup Wi-Fi shown on the device.");
     return;
   }
+  lastWebActivity = millis();
   const int16_t scanStatus = WiFi.scanComplete();
   std::vector<ScannedNetwork> scanned;
   if (scanStatus >= 0) {
@@ -163,6 +180,7 @@ void serveSetup() {
       R"HTML(noscript #wifi_select_wrap{display:none !important}</style></head><body>)HTML"
       R"HTML(<h1>Your little desk companion</h1>)HTML"
       R"HTML(<p>Set up once. Clock and alarms work offline after the time is synced.</p>)HTML"
+      R"HTML(<p><small>Setup Wi-Fi closes after 5 minutes without activity. Hold BOOT to reopen it.</small></p>)HTML"
       R"HTML(<form method="post" action="/save"><input type="hidden" name="token" value=")HTML";
   html += formToken;
   html += R"HTML("><div id="wifi_select_wrap"><div class="wifi-hdr">)HTML"
@@ -216,6 +234,34 @@ const manBox=document.getElementById('manual_box');
 const passInp=document.getElementById('password');
 const scanBtn=document.getElementById('scan_btn');
 let pollTimer=null;
+// Only interaction extends the session; an abandoned tab sends no heartbeat.
+let lastActivityPing=-15000;
+let nextActivityAttempt=0;
+let activityPending=false;
+function noteSetupActivity(){
+  const now=performance.now();
+  if(activityPending||now-lastActivityPing<15000||now<nextActivityAttempt)return;
+  activityPending=true;
+  nextActivityAttempt=now+1000;
+  const controller=new AbortController();
+  const timeout=setTimeout(function(){controller.abort();},2000);
+  fetch('/activity',{
+    method:'POST',
+    headers:{'Content-Type':'application/x-www-form-urlencoded'},
+    body:'token='+encodeURIComponent(document.querySelector('input[name="token"]').value),
+    signal:controller.signal
+  }).then(function(response){
+    // Only an acknowledged request earns the long throttle. Continued input can
+    // retry a failed request after 1 s, including non-2xx HTTP responses.
+    if(response.ok)lastActivityPing=performance.now();
+  }).catch(function(){}).finally(function(){
+    clearTimeout(timeout);
+    activityPending=false;
+  });
+}
+['input','change','pointerdown','keydown'].forEach(function(event){
+  document.addEventListener(event,noteSetupActivity);
+});
 sel.addEventListener('change',function(){
   if(this.value==='__manual__'){
     ssidInp.value='';manBox.style.display='block';ssidInp.focus();
@@ -310,10 +356,11 @@ bool validPetName(const String &name) {
 }
 
 void saveSetup() {
-  if (!setupClientAllowed() || !server.hasArg("token") || server.arg("token") != formToken) {
+  if (!setupTokenAllowed()) {
     server.send(403, "text/plain", "Invalid setup session.");
     return;
   }
+  lastWebActivity = millis();
   uint32_t newPlace = 0, newBrightness = 0, epoch = 0;
   const String name = server.arg("pet");
   const String ssid = server.arg("ssid");
@@ -362,6 +409,7 @@ void initSetupPortal(AppState &state, const NetworkCredentials &network, SetupSa
   server.on("/", HTTP_GET, serveSetup);
   server.on("/scan", HTTP_GET, handleScan);
   server.on("/save", HTTP_POST, saveSetup);
+  server.on("/activity", HTTP_POST, handleActivity);
   server.onNotFound([]() { server.send(404, "text/plain", "Not found"); });
 }
 
@@ -386,6 +434,7 @@ bool openSetupPortal() {
     return false;
   }
   setup.open = true;
+  lastWebActivity = millis();
   triggerWifiScan();
   server.begin();
   Serial.println("{\"event\":\"setup_open\",\"url\":\"http://192.168.4.1\"}");
@@ -409,4 +458,11 @@ void closeSetupPortal() {
   appState->lastInteraction = millis();
 }
 
-void pollSetupPortal() { server.handleClient(); }
+void pollSetupPortal() {
+  server.handleClient();
+  if (!appState->touch.down &&
+      power::setupTimedOut(millis(), lastWebActivity, appState->lastInteraction)) {
+    Serial.println("{\"event\":\"setup_timeout\"}");
+    closeSetupPortal();  // restores station mode and reconnects to the saved Wi-Fi
+  }
+}
